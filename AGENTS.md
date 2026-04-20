@@ -41,11 +41,25 @@ Preserve the ontology. Do not invent parallel abstractions.
 
 ## Debt list (tolerated, not fires)
 
-- `source_ref: str` — will likely become SourceRef type when PostGIS forces it
+- `source_ref: str` in Connector protocol — SourceRef type exists but protocol not updated (backward compat)
 - `OperatorSpec.output_type` is singular — will need multi-output when tile-splitting appears
 - `Lineage` on Artifact is a single object — may need append-only for multi-stage provenance
 - Legacy `src/georuntime/` — migration deferred until packages are stable
 - No Flow or Adapter implementations yet
+- Connector selection/routing — 4 connectors exist, no dispatcher for auto-routing
+- `BackingStoreKind.REMOTE_URI` unused — may be dead weight
+
+## Raiding source: hydrops/
+
+`hydrops/` lives in repo root as an unintegrated reference codebase. It is NOT a package.
+
+**Extractable targets (ranked by substrate value):**
+1. Check patterns — backend compliance, conservation residuals, seam mismatch detection
+2. COG connector / I/O accounting — COGRaster, windowed reads, byte metrics
+3. Hydrology operators — D8 flow, toposort accumulation, depression fill
+4. Tile scheduler concepts — TileStageGraph, memory-bounded batching (future executor)
+
+**Rules:** Extract one piece at a time. Rewrite to fit quarry contracts. Pressure-test before merging. Do NOT import wholesale.
 
 ## Immediate roadmap
 

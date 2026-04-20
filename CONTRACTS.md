@@ -30,7 +30,33 @@ The sacred gateway. No geospatial object enters except through a connector.
 - **Capabilities** are explicit flags: MATERIALIZE, DISCOVER, AUTHENTICATE, STREAM, MATERIALIZE_LAZY, METADATA_ONLY.
 - **Optional protocols**: Discoverable, Authenticatable, MetadataEmitter.
 
-`source_ref` is currently `str`. Scheduled debt — will likely become a SourceRef type.
+`source_ref` remains `str` in the Connector protocol (backward compat). `SourceRef` type exists
+as an explicit construction/routing utility — see below.
+
+## SourceRef
+
+Typed envelope for source references. Lives in quarry-core (zero deps).
+
+- **raw**: the original string, always preserved, always round-trippable via `str(ref)`
+- **kind**: classification tag (LOCAL_PATH, REMOTE_URI, CATALOG_ITEM, DATABASE_REF, UNKNOWN)
+- **params**: optional parsed fields (connector-specific structure)
+
+Factory methods:
+- `SourceRef.local(path)` → LOCAL_PATH
+- `SourceRef.uri(url)` → REMOTE_URI
+- `SourceRef.stac(collection, item, asset=)` → CATALOG_ITEM
+- `SourceRef.postgis(schema, table)` → DATABASE_REF
+- `SourceRef.postgis_query(sql)` → DATABASE_REF
+- `SourceRef.infer(raw)` → best-effort classification from raw string
+
+What SourceRef is NOT:
+- Not a replacement for `source_ref: str` in the protocol
+- Not a connector selector/router
+- Not a validator (bad refs are still representable)
+- Not a class hierarchy
+
+Connector protocol still receives `str`. Callers pass `ref.raw` or `str(ref)`.
+SourceRef helps callers construct refs explicitly and helps routing layers classify them.
 
 ## Operator
 

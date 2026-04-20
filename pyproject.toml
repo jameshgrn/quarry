@@ -44,4 +44,6 @@ quarry-registry = { workspace = true }
 dev = [
     "matplotlib>=3.10.8",
     "pillow>=12.2.0",
+    "pytest>=7.0.0",
+    "pytz>=2024.1",
 ]

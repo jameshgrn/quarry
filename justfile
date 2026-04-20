@@ -35,7 +35,7 @@ lock:
 tree:
     @echo "quarry-core (zero deps)"
     @echo "  ↑"
-    @echo "quarry-connectors (+ rasterio, fiona, pystac-client)"
+    @echo "quarry-connectors (+ rasterio, fiona, pystac-client, psycopg, shapely, requests)"
     @echo "quarry-operators  (+ rasterio, fiona, shapely)"
     @echo "quarry-registry   (+ duckdb)"
 
