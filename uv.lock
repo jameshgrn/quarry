@@ -8,8 +8,17 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "2026-04-01T18:18:19.913676Z"
+exclude-newer = "2026-04-13T18:28:47.03786Z"
 exclude-newer-span = "P7D"
+
+[manifest]
+members = [
+    "georuntime",
+    "quarry-connectors",
+    "quarry-core",
+    "quarry-operators",
+    "quarry-registry",
+]
 
 [[package]]
 name = "affine"
@@ -295,7 +304,7 @@ name = "exceptiongroup"
 version = "1.3.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "typing-extensions", marker = "python_full_version < '3.11'" },
+    { name = "typing-extensions", marker = "python_full_version < '3.12'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/50/79/66800aadf48771f6b62f7eb014e352e5d06856655206165d775e675a02c9/exceptiongroup-1.3.1.tar.gz", hash = "sha256:8b412432c6055b0b7d14c310000ae93352ed6754f70fa8f7c34141f91c4e3219", size = 30371, upload-time = "2025-11-21T23:01:54.787Z" }
 wheels = [
@@ -950,6 +959,94 @@ sdist = { url = "https://files.pythonhosted.org/packages/66/c0/0c8b6ad9f17a802ee
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ec/57/56b9bcc3c9c6a792fcbaf139543cee77261f3651ca9da0c93f5c1221264b/python_dateutil-2.9.0.post0-py2.py3-none-any.whl", hash = "sha256:a8b2bc7bffae282281c8140a97d3aa9c14da0b136dfe83f850eea9a5f7470427", size = 229892, upload-time = "2024-03-01T18:36:18.57Z" },
 ]
+
+[[package]]
+name = "quarry-connectors"
+version = "0.1.0"
+source = { editable = "packages/quarry-connectors" }
+dependencies = [
+    { name = "fiona" },
+    { name = "quarry-core" },
+    { name = "rasterio", version = "1.4.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "rasterio", version = "1.5.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "fiona", specifier = ">=1.9.0" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0.0" },
+    { name = "quarry-core", editable = "packages/quarry-core" },
+    { name = "rasterio", specifier = ">=1.3.0" },
+]
+provides-extras = ["dev"]
+
+[[package]]
+name = "quarry-core"
+version = "0.1.0"
+source = { editable = "packages/quarry-core" }
+
+[package.optional-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0.0" }]
+provides-extras = ["dev"]
+
+[[package]]
+name = "quarry-operators"
+version = "0.1.0"
+source = { editable = "packages/quarry-operators" }
+dependencies = [
+    { name = "fiona" },
+    { name = "quarry-core" },
+    { name = "rasterio", version = "1.4.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "rasterio", version = "1.5.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "shapely" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "fiona", specifier = ">=1.9.0" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0.0" },
+    { name = "quarry-core", editable = "packages/quarry-core" },
+    { name = "rasterio", specifier = ">=1.3.0" },
+    { name = "shapely", specifier = ">=2.1.0" },
+]
+provides-extras = ["dev"]
+
+[[package]]
+name = "quarry-registry"
+version = "0.1.0"
+source = { editable = "packages/quarry-registry" }
+dependencies = [
+    { name = "duckdb" },
+    { name = "quarry-core" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "duckdb", specifier = ">=1.0.0" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0.0" },
+    { name = "quarry-core", editable = "packages/quarry-core" },
+]
+provides-extras = ["dev"]
 
 [[package]]
 name = "rasterio"

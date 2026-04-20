@@ -3,21 +3,20 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "quarry-connectors"
+name = "quarry-registry"
 version = "0.1.0"
-description = "Quarry connector implementations"
+description = "DuckDB-backed artifact and run registry for Quarry"
 requires-python = ">=3.10"
 dependencies = [
     "quarry-core",
-    "rasterio>=1.3.0",
-    "fiona>=1.9.0",
+    "duckdb>=1.0.0",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest>=7.0.0"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/quarry_connectors"]
+packages = ["src/quarry_registry"]
 
 [tool.ruff]
 line-length = 100
