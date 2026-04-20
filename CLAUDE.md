@@ -78,13 +78,15 @@ just tree          # Show package dependency graph
 - `OperatorSpec.output_type` singular — multi-output deferred until tile-splitting
 - `Lineage` single object — may need append-only for multi-stage provenance
 - Legacy `src/georuntime/` — migration deferred
+- FillDepressions pure-Python loops — numba acceleration deferred until perf measured
+- Flat gradient uses naive BFS — Barnes et al. (2015) optimal flat resolution deferred
 
 ## Substrate Phase Definition of Done
 
 Substrate phase is complete when:
 - Core ontology remains stable (no breaking contract changes)
 - 3–5 connectors exist (currently: 4 — LocalFile, STAC, PostGIS, COG)
-- 3–5 operators exist (currently: 2)
+- 3–5 operators exist (currently: 3 — ClipRaster, Reproject, FillDepressions)
 - Registry persists artifacts/runs/checks/lineage (done)
 - One end-to-end flow works across local + one remote source (done)
 - No UI work beyond minimal debug CLI

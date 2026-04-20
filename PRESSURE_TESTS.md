@@ -177,3 +177,37 @@ The real emerging question is connector selection, not source_ref parsing.
 
 **Summary:** Seven pressure tests. First contract addition (SourceRef) to quarry-core.
 Connector protocol unchanged. 157 total tests pass. Ontology enriched, not broken.
+
+## 8. FillDepressions Operator (2026-04-20)
+
+**Components:** FillDepressionsOperator (first hydrology domain operator)
+**Tests:** 30
+**Contract changes:** None
+
+**Proved:**
+- Priority-Flood (Wang & Liu 2006) implementation correct: single pits, multi-cell bowls, nested
+- Boundary cells always treated as outlets (never raised)
+- Elevation monotonically non-decreasing (never lowers cells)
+- Zero interior pits remain after fill (correctness invariant holds on random 100x100)
+- Nodata cells preserved through fill (masked, not processed)
+- Flat gradient resolution via BFS creates D8-resolvable slopes
+- Already-drained DEMs pass through unchanged (idempotent on valid input)
+- Single-band enforcement (rejects multi-band rasters)
+- Operator protocol fully satisfied (spec, validate, execute, declared_checks)
+- Fresh metadata from output file (not copied from input)
+- Lineage records algorithm parameters
+
+**Signals:**
+- Operator protocol handles domain-specific checks naturally (no_interior_pits, elevation_only_raised)
+- Single-input single-output is comfortable for preprocessing ops
+- ResourceScale.MEDIUM appropriate (O(n log n), can be expensive on large DEMs)
+- numpy-only implementation (no numba) — sufficient for substrate proof, optimization later
+
+**Debt observed:**
+- Pure Python loops in Priority-Flood will be slow on large DEMs (>1000x1000).
+  Numba acceleration deferred until performance is a measured problem.
+- Flat gradient uses BFS from outlet edges — correct but naive. Barnes et al. (2015)
+  is the canonical reference for optimal flat resolution. Deferred.
+
+**Summary:** Eight pressure tests. Third operator added (fill_depressions). First hydrology
+domain incision. Zero contract changes. 187 total tests passing.

@@ -32,8 +32,9 @@ quarry/                          # Monorepo root
 │   │
 │   ├── quarry-operators/        # Deps: rasterio, fiona, shapely
 │   │   └── src/quarry_operators/
-│   │       ├── clip_raster.py   # ClipRasterOperator (bounds + mask)
-│   │       └── reproject.py     # ReprojectOperator (raster + vector CRS transform)
+│   │       ├── clip_raster.py       # ClipRasterOperator (bounds + mask)
+│   │       ├── reproject.py         # ReprojectOperator (raster + vector CRS transform)
+│   │       └── fill_depressions.py  # FillDepressionsOperator (Priority-Flood DEM preprocessing)
 │   │
 │   └── quarry-registry/         # Deps: duckdb
 │       └── src/quarry_registry/
@@ -42,7 +43,7 @@ quarry/                          # Monorepo root
 ├── src/georuntime/              # Legacy prototype (DO NOT MODIFY — migration deferred)
 │
 ├── tests/
-│   ├── pressure_test/           # Substrate pressure tests (157 tests)
+│   ├── pressure_test/           # Substrate pressure tests (187 tests)
 │   │   ├── conftest.py          # PYTHONPATH setup for dev
 │   │   ├── test_end_to_end.py   # Kernel: connector → operator → executor (15)
 │   │   ├── test_registry.py     # Registry round-trips (18)
@@ -50,7 +51,8 @@ quarry/                          # Monorepo root
 │   │   ├── test_reproject.py    # Reproject stress (19)
 │   │   ├── test_postgis_connector.py # PostGIS adversarial (25)
 │   │   ├── test_cog_connector.py # COG adversarial (24)
-│   │   └── test_source_ref.py  # SourceRef contract (34)
+│   │   ├── test_source_ref.py  # SourceRef contract (34)
+│   │   └── test_fill_depressions.py # FillDepressions hydrology op (30)
 │   └── fixtures/                # Test data (gitignored binaries)
 │
 └── hydrops/                     # RAIDING SOURCE — not a package, not integrated
