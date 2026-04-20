@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+
+# Runtime
+.georuntime/
+
+# OS
+.DS_Store
+
+# Env
+.env
+.env.*
+
+# Ruff
+.ruff_cache/
+
+# Pytest
+.pytest_cache/
+
+# Session
+HANDOVER.md
+
+# Test fixtures (binary)
+tests/fixtures/*.tif
+tests/fixtures/*.shp
+tests/fixtures/*.dbf
+tests/fixtures/*.shx
+tests/fixtures/*.prj
+
+# Lock files stay (uv.lock committed)
