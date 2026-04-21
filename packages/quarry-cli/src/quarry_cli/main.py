@@ -16,16 +16,6 @@ def _resolve_workspace(args) -> Path:
     return Path(args.workspace).resolve()
 
 
-def _get_output_artifact_id(registry, run_id: str) -> str | None:
-    """Read output_artifact_id directly from the runs table."""
-    conn = registry._connect()
-    try:
-        row = conn.execute("SELECT output_artifact_id FROM runs WHERE id = ?", [run_id]).fetchone()
-        return row[0] if row else None
-    finally:
-        conn.close()
-
-
 # ---------------------------------------------------------------------------
 # artifacts list
 # ---------------------------------------------------------------------------
@@ -204,11 +194,10 @@ def cmd_runs_show(args) -> int:
         for k, v in run.params.items():
             print(f"  {k}: {v}")
 
-    # output not reconstructed on RunRecord; look up artifact directly
-    output_artifact = registry.get_artifact(_get_output_artifact_id(registry, run.id))
-    if output_artifact:
+    if run.output:
+        art = run.output.artifact
         print("\nOutput:")
-        print(f"  {output_artifact.id}  {output_artifact.type.value}  {output_artifact.name}")
+        print(f"  {art.id}  {art.type.value}  {art.name}")
 
     if run.checks:
         print(f"\nChecks ({len(run.checks)}):")
