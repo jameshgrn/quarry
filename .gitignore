@@ -41,4 +41,7 @@ tests/fixtures/*.dbf
 tests/fixtures/*.shx
 tests/fixtures/*.prj
 
+# Raiding sources (reference only, not part of substrate)
+hydrops/
+
 # Lock files stay (uv.lock committed)
