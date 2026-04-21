@@ -52,12 +52,12 @@ quarry/                          # Monorepo root
 │   │
 │   └── quarry-cli/              # Deps: quarry-core + connectors + operators + registry
 │       └── src/quarry_cli/
-│           └── main.py          # argparse CLI: artifacts list/show, lineage, run hydrology
+│           └── main.py          # argparse CLI: artifacts list/show, lineage, run hydrology/zonal
 │
 ├── src/georuntime/              # Legacy prototype (DO NOT MODIFY — migration deferred)
 │
 ├── tests/
-│   ├── pressure_test/           # Substrate pressure tests (483 tests, 19 suites)
+│   ├── pressure_test/           # Substrate pressure tests (495 tests, 20 suites)
 │   │   ├── conftest.py          # PYTHONPATH setup for dev
 │   │   ├── test_end_to_end.py   # Kernel: connector → operator → executor (15)
 │   │   ├── test_registry.py     # Registry round-trips (18)
@@ -78,7 +78,8 @@ quarry/                          # Monorepo root
 │   │   ├── test_spatial_join.py # SpatialJoin vector×vector (20)
 │   │   ├── test_build_cog.py   # BuildCOG normalization (22)
 │   │   ├── test_rasterize_vector.py # RasterizeVector polygon→raster (25)
-│   │   └── test_cli.py          # CLI adapter: list/show/lineage/run hydrology (19)
+│   │   ├── test_cli.py          # CLI adapter: list/show/lineage/run hydrology (19)
+│   │   └── test_cli_zonal.py    # CLI adapter: run zonal end-to-end (12)
 │   └── fixtures/                # Test data (gitignored binaries)
 │
 ├── examples/

@@ -608,3 +608,38 @@ operator. Zero contract changes. 464 total tests passing.
 
 **Summary:** Nineteen pressure tests. First adapter-lane package (quarry-cli).
 Zero contract changes. 483 total tests passing.
+
+## 20. CLI Zonal Flow (2026-04-21)
+
+**Components:** `quarry run zonal` CLI command (raster + polygon zones → CSV)
+**Tests:** 12
+**Contract changes:** None
+
+**Lane:** adapter
+
+**Proved:**
+- `run zonal` end-to-end: raster + zones → CSV output + registry populated
+- Output CSV has correct schema (zone_id + 6 stat columns) and row count matches zones
+- Registry contains 3 artifacts (raster + zones + output table)
+- Lineage: output table has 2 ancestors (raster + zones)
+- `--band` flag selects correct raster band (verified with multiband raster)
+- `--zone-id-field` extracts named zone IDs from feature properties
+- `--workspace` flag respected (output + registry land in specified dir)
+- Returns 1 for missing raster path
+- Returns 1 for missing zones path
+- Nodata pixels excluded from statistics
+- Full round-trip: run zonal → artifacts list → artifacts show → lineage
+- `--type table` filter shows exactly 1 artifact after zonal run
+
+**Signals:**
+- Two-input operator (raster + vector) wires to CLI as naturally as single-input flow
+- No flow composition class needed — CLI directly wires connector → executor → operator → registry
+- GeoPackage fixtures needed (GeoJSON normalizes CRS to 4326 per spec)
+- The substrate's connector → operator → registry pathway works identically for single-step and multi-step flows
+
+**Debt observed:**
+- Generic operator dispatch still deferred — each flow is hand-wired in CLI
+- No `run sample` command yet (SampleRaster is the obvious third flow)
+
+**Summary:** Twenty pressure tests. Second CLI flow (zonal stats). Exercises two-input
+operator pattern through CLI. Zero contract changes. 495 total tests passing.

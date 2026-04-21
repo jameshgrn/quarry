@@ -88,7 +88,7 @@ just tree          # Show package dependency graph
 - RasterizeVector only tested with polygons — line/point rasterization deferred
 - RasterizeVector single-band only — multi-band output deferred
 - RasterizeVector no all_touched option — deferred until needed
-- CLI only exposes HydrologyFlow via `run` — generic operator dispatch deferred
+- CLI exposes hydrology + zonal flows — generic operator dispatch deferred
 - CLI plain text output only — JSON mode deferred until needed
 - CLI no `run list` / `run show` — deferred until run inspection needed from CLI
 
@@ -100,7 +100,7 @@ Substrate phase is complete. All criteria met:
 - 10 operators: ClipRaster, Reproject, FillDepressions, D8FlowDirection, FlowAccumulation, ZonalStats, SpatialJoin, BuildCOG, SampleRaster, RasterizeVector
 - Registry persists artifacts/runs/checks/lineage
 - End-to-end flow works (HydrologyFlow + zonal stats + COG export)
-- 483 tests passing (19 pressure test suites)
+- 495 tests passing (20 pressure test suites)
 
 ## v0.2.0 Milestone — Consolidation & Legibility — COMPLETE
 
@@ -111,9 +111,9 @@ Substrate phase is complete. All criteria met:
 ## v0.3.0 Milestone — CLI Adapter
 
 - `quarry-cli` package: minimal CLI invocation surface (lane: adapter)
-- Commands: `quarry artifacts list/show`, `quarry lineage`, `quarry run hydrology`
+- Commands: `quarry artifacts list/show`, `quarry lineage`, `quarry run hydrology`, `quarry run zonal`
 - Zero new dependencies (argparse only)
-- 19 pressure tests for CLI adapter
+- 31 pressure tests for CLI adapter (19 base + 12 zonal)
 
 ## What NOT to build yet
 

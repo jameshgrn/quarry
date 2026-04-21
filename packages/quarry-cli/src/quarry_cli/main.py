@@ -191,6 +191,84 @@ def cmd_run_hydrology(args) -> int:
 
 
 # ---------------------------------------------------------------------------
+# run zonal
+# ---------------------------------------------------------------------------
+
+
+def cmd_run_zonal(args) -> int:
+    from quarry_connectors.local_file import LocalFileConnector
+    from quarry_core.executors.local import LocalExecutor
+    from quarry_operators.zonal_stats import ZonalStatsOperator, ZonalStatsParams
+    from quarry_registry.registry import Registry
+
+    raster_path = Path(args.raster).resolve()
+    if not raster_path.exists():
+        print(f"Raster file not found: {raster_path}", file=sys.stderr)
+        return 1
+
+    zones_path = Path(args.zones).resolve()
+    if not zones_path.exists():
+        print(f"Zones file not found: {zones_path}", file=sys.stderr)
+        return 1
+
+    workspace = _resolve_workspace(args)
+
+    # Materialize both inputs through connector
+    connector = LocalFileConnector()
+    print(f"Materializing raster: {raster_path}")
+    raster_artifact = connector.materialize(str(raster_path), workspace).artifact
+
+    print(f"Materializing zones: {zones_path}")
+    zones_artifact = connector.materialize(str(zones_path), workspace).artifact
+
+    # Set up executor + registry
+    executor = LocalExecutor()
+    registry = Registry(workspace)
+    registry.save_artifact(raster_artifact)
+    registry.save_artifact(zones_artifact)
+
+    # Execute zonal stats
+    output_dir = workspace / "zonal"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / "zonal_stats.csv"
+
+    params = ZonalStatsParams(
+        output_path=str(output_path),
+        band=args.band,
+        zone_id_field=args.zone_id_field,
+    )
+
+    print(f"Running zonal stats → {output_path}")
+    try:
+        run_record = executor.submit(
+            ZonalStatsOperator(),
+            [raster_artifact, zones_artifact],
+            params,
+        )
+    except Exception as e:
+        print(f"FAILED: {e}", file=sys.stderr)
+        return 1
+
+    # Persist
+    registry.save_run(run_record)
+
+    # Report
+    output = run_record.output.artifact
+    uri = output.backing.uri if output.backing else "?"
+    print(f"\nCompleted (1 step, {len(run_record.checks)} checks)")
+    print(f"  {output.name:<25} → {uri}")
+
+    invalid = [c for c in run_record.checks if c.state.value == "invalid"]
+    if invalid:
+        print(f"\nWARNING: {len(invalid)} invalid check(s):")
+        for c in invalid:
+            print(f"  [{c.check_name}] {c.message}")
+
+    print(f"\nRegistry: {registry.db_path}")
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # Parser
 # ---------------------------------------------------------------------------
 
@@ -243,6 +321,17 @@ def build_parser() -> argparse.ArgumentParser:
     hydro.add_argument("--no-gradient", action="store_true", help="Disable flat-region gradient")
     hydro.add_argument("--weight", type=float, default=1.0, help="Flow accumulation weight")
     hydro.set_defaults(func=cmd_run_hydrology)
+
+    # run zonal
+    zonal = run_sub.add_parser("zonal", help="Run zonal statistics (raster + polygon zones → CSV)")
+    zonal.add_argument("--raster", required=True, help="Path to input raster")
+    zonal.add_argument(
+        "--zones", required=True, help="Path to polygon zones (GeoPackage, shapefile)"
+    )
+    zonal.add_argument("--workspace", default=".", help="Workspace directory (default: .)")
+    zonal.add_argument("--band", type=int, default=1, help="Raster band to analyze (default: 1)")
+    zonal.add_argument("--zone-id-field", default=None, help="Feature property to use as zone ID")
+    zonal.set_defaults(func=cmd_run_zonal)
 
     return parser
 
