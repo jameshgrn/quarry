@@ -3,10 +3,10 @@
 import tempfile
 
 import fiona
+import fiona.crs
 import numpy as np
 import pytest
 import rasterio
-from fiona.crs import CRS as FionaCRS
 from rasterio.crs import CRS
 
 from georuntime.core.inspect import inspect_file
@@ -58,7 +58,7 @@ class TestInspectVector:
             geojson_path,
             "w",
             driver="GeoJSON",
-            crs=FionaCRS.from_epsg(4326),
+            crs=fiona.crs.CRS.from_epsg(4326),
             schema=schema,
         ) as dst:
             dst.write(

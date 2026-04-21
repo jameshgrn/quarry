@@ -250,7 +250,7 @@ class ReprojectOperator:
 
     def _reproject_vector(self, artifact: Artifact, params: ReprojectParams) -> OperatorResult:
         import fiona
-        from fiona.crs import CRS as FionaCRS
+        import fiona.crs
         from fiona.transform import transform_geom
 
         input_path = artifact.backing.uri
@@ -260,7 +260,7 @@ class ReprojectOperator:
         try:
             with fiona.open(input_path) as src:
                 src_crs = src.crs
-                dst_crs = FionaCRS.from_user_input(params.target_crs)
+                dst_crs = fiona.crs.CRS.from_user_input(params.target_crs)
 
                 out_schema = src.schema.copy()
                 out_driver = src.driver
@@ -373,7 +373,10 @@ class ReprojectOperator:
                     CheckResult(
                         check_name="crs_matches_target",
                         state=ValidationState.WARN,
-                        message=f"Output CRS '{output_crs_str}' may not match target '{params.target_crs}'",
+                        message=(
+                            f"Output CRS '{output_crs_str}' may not match"
+                            f" target '{params.target_crs}'"
+                        ),
                     )
                 )
 

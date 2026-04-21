@@ -153,7 +153,7 @@ class TestSourceRefParsing:
             api_url="https://example.com/stac",
             collection="sentinel-2-l2a",
         )
-        result = conn.materialize("S2A_20230615_T10SGD", tmp_path)
+        conn.materialize("S2A_20230615_T10SGD", tmp_path)
         mock_fetch.assert_called_once_with("sentinel-2-l2a", "S2A_20230615_T10SGD")
 
     def test_bare_item_id_without_default_collection_errors(self, tmp_path):

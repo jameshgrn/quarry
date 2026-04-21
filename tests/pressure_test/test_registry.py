@@ -10,7 +10,6 @@ Failure signals:
 - Backing store becoming illegible after deserialization
 """
 
-
 import numpy as np
 import pytest
 import rasterio
@@ -339,7 +338,7 @@ class TestLineage:
 
         # Full lineage of gen2 should include gen1 and source
         full_lineage = registry.get_full_lineage(gen2_id)
-        ancestor_ids = [l["artifact_id"] for l in full_lineage]
+        ancestor_ids = [row["artifact_id"] for row in full_lineage]
         assert gen1_artifact.id in ancestor_ids
         assert mat.artifact.id in ancestor_ids
 

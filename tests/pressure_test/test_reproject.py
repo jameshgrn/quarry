@@ -10,12 +10,11 @@ Stress points:
 7. Vector reprojection (second artifact type through same operator)
 """
 
-
 import fiona
+import fiona.crs
 import numpy as np
 import pytest
 import rasterio
-from fiona.crs import CRS as FionaCRS
 from quarry_connectors.local_file import LocalFileConnector
 from quarry_core.artifact import (
     Artifact,
@@ -64,7 +63,7 @@ def sample_vector_4326(tmp_path):
         path,
         "w",
         driver="GeoJSON",
-        crs=FionaCRS.from_epsg(4326),
+        crs=fiona.crs.CRS.from_epsg(4326),
         schema=schema,
     ) as dst:
         for i in range(10):
