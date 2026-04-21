@@ -86,7 +86,7 @@ just tree          # Show package dependency graph
 Substrate phase is complete when:
 - Core ontology remains stable (no breaking contract changes)
 - 3–5 connectors exist (currently: 4 — LocalFile, STAC, PostGIS, COG)
-- 3–5 operators exist (currently: 3 — ClipRaster, Reproject, FillDepressions)
+- 3–5 operators exist (currently: 4 — ClipRaster, Reproject, FillDepressions, D8FlowDirection)
 - Registry persists artifacts/runs/checks/lineage (done)
 - One end-to-end flow works across local + one remote source (done)
 - No UI work beyond minimal debug CLI

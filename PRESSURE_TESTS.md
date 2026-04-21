@@ -211,3 +211,35 @@ Connector protocol unchanged. 157 total tests pass. Ontology enriched, not broke
 
 **Summary:** Eight pressure tests. Third operator added (fill_depressions). First hydrology
 domain incision. Zero contract changes. 187 total tests passing.
+
+## 9. D8 Flow Direction Operator (2026-04-20)
+
+**Components:** D8FlowDirectionOperator (second hydrology operator, chains after FillDepressions)
+**Tests:** 27
+**Contract changes:** None
+
+**Proved:**
+- Steepest descent correctly picks direction across all 8 compass codes
+- Diagonal distance weighting (sqrt(2)) affects direction selection appropriately
+- Boundary cells with no lower neighbor → OUTLET code
+- Nodata cells → NODATA code, never assigned direction
+- Two-pass flat resolution: PIT cells on flat surfaces route to equal-elevation
+  neighbors that can drain (iterative propagation until stable)
+- Fill → D8 chain: zero PITs on both hand-crafted and random 50x50 DEMs
+- Operator protocol fully satisfied
+- Direction encoding documented in artifact metadata
+
+**Signals:**
+- Flat resolution requires iterative pass — single-pass D8 is insufficient for filled DEMs
+- Operator sequence semantics emerging: fill_depressions → d8_flow_direction is a precondition chain
+- Check "no_pits" uses WARN not INVALID — operator works on unfilled DEMs too, just flags the issue
+- O(n) algorithm (two linear passes + iteration on PITs only) — fast enough for substrate
+
+**Debt observed:**
+- Pure Python loops same as FillDepressions — numba deferred
+- Flat resolution iterates until convergence — worst case O(n) iterations on pathological flats.
+  Could use BFS from draining cells instead. Deferred.
+- No cycle detection yet — assumed acyclic after fill. Add if needed.
+
+**Summary:** Nine pressure tests. Fourth operator added (d8_flow_direction). Hydrology chain
+emerging: fill → D8. Zero contract changes. 214 total tests passing.
