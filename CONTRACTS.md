@@ -58,6 +58,31 @@ What SourceRef is NOT:
 Connector protocol still receives `str`. Callers pass `ref.raw` or `str(ref)`.
 SourceRef helps callers construct refs explicitly and helps routing layers classify them.
 
+## ConnectorRouter
+
+Selection layer: given a SourceRef (or raw string), returns ranked eligible connectors.
+Lives in quarry-core (zero deps). Lane: registry.
+
+- **Input**: `SourceRef | str` — raw strings auto-inferred via `SourceRef.infer()`
+- **Output**: `list[ConnectorMatch]` — ranked by priority (lower = better)
+- **No execution** — selection only. Does not call `materialize`.
+- Connectors register with explicit `kinds: set[SourceRefKind]` + `priority: int`
+- `fallback=True` connectors also match UNKNOWN refs (ranked +1000)
+- `select()` returns all matches sorted by rank
+- `select_one()` returns best match or raises `NoConnectorError`
+
+Precedence rules (with standard registration):
+- Local GeoTIFF → COG (priority 0) + LocalFile (priority 10) — both match, COG preferred
+- Remote URI → COG only
+- STAC catalog item → STAC only
+- Database ref → PostGIS only
+- Unknown → fallback connectors only (if any registered)
+
+What ConnectorRouter is NOT:
+- Not an executor (does not call materialize)
+- Not a factory (does not create connector instances)
+- Not a protocol change (Connector protocol unchanged)
+
 ## Operator
 
 A typed transformation: artifacts in, artifact out.

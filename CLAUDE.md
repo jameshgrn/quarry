@@ -74,7 +74,7 @@ just tree          # Show package dependency graph
 
 ## Scheduled Debt
 
-- `source_ref: str` in Connector protocol — SourceRef type exists, protocol update deferred
+- `source_ref: str` in Connector protocol — SourceRef type exists, ConnectorRouter handles routing, protocol update deferred
 - `OperatorSpec.output_type` singular — multi-output deferred until tile-splitting
 - `Lineage` single object — may need append-only for multi-stage provenance
 - Legacy `src/georuntime/` — migration deferred

@@ -17,6 +17,7 @@ quarry/                          # Monorepo root
 │   │       ├── artifact.py      # Artifact, BackingStore, SpatialDescriptor, Lineage, CheckResult
 │   │       ├── connector.py     # Connector protocol, MaterializeResult, ConnectorCapability
 │   │       ├── source_ref.py    # SourceRef, SourceRefKind (typed envelope for source references)
+│   │       ├── router.py        # ConnectorRouter, ConnectorMatch (selection layer)
 │   │       ├── operator.py      # Operator protocol, OperatorSpec, OperatorResult
 │   │       ├── executor.py      # Executor protocol, RunRecord, RunStatus
 │   │       ├── check.py         # Check protocol + CRSValid, ExtentSane, BackingStoreAccessible
@@ -51,7 +52,7 @@ quarry/                          # Monorepo root
 ├── src/georuntime/              # Legacy prototype (DO NOT MODIFY — migration deferred)
 │
 ├── tests/
-│   ├── pressure_test/           # Substrate pressure tests (405 tests, 16 suites)
+│   ├── pressure_test/           # Substrate pressure tests (439 tests, 17 suites)
 │   │   ├── conftest.py          # PYTHONPATH setup for dev
 │   │   ├── test_end_to_end.py   # Kernel: connector → operator → executor (15)
 │   │   ├── test_registry.py     # Registry round-trips (18)
@@ -60,6 +61,7 @@ quarry/                          # Monorepo root
 │   │   ├── test_postgis_connector.py # PostGIS adversarial (25)
 │   │   ├── test_cog_connector.py # COG adversarial (24)
 │   │   ├── test_source_ref.py  # SourceRef contract (34)
+│   │   ├── test_connector_router.py # ConnectorRouter routing (34)
 │   │   ├── test_fill_depressions.py # FillDepressions hydrology op (30)
 │   │   ├── test_d8_flow_direction.py # D8 flow direction + chain tests (27)
 │   │   ├── test_flow_accumulation.py # Flow accumulation + full chain (27)

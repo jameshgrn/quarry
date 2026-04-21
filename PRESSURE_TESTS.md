@@ -492,3 +492,39 @@ normalization operator. Zero contract changes. 383 total tests passing.
 
 **Summary:** Sixteen pressure tests. Ninth operator (sample_raster). Second raster+vector
 cross-type operator. Zero contract changes. 405 total tests passing.
+
+## 17. ConnectorRouter (2026-04-21)
+
+**Components:** ConnectorRouter (connector selection/routing layer)
+**Tests:** 34
+**Contract changes:** YES — ConnectorRouter added to quarry-core. Connector protocol unchanged.
+
+**Proved:**
+- Local GeoTIFF ambiguity: both COG and LocalFile match, COG ranked first (priority 0 vs 10)
+- Remote COG URIs (https, s3, gs): only COG matches
+- STAC catalog items: only STAC matches (collection/item, with asset)
+- PostGIS refs: only PostGIS matches (schema.table, SQL query)
+- Unknown/unsupported source: only fallback connectors match (ranked +1000)
+- No fallback → empty result for UNKNOWN
+- select_one raises NoConnectorError with kind and raw in message
+- Raw string backward compat: strings auto-inferred via SourceRef.infer()
+- Priority ordering: lower number = higher rank, custom priorities reverse default order
+- ConnectorMatch is sortable by rank
+- Registration introspection for debugging
+- Edge cases: empty string, SourceRef passthrough (not re-inferred), stub protocol compliance
+
+**Signals:**
+- Router resolves the "connector selection" debt from pressure test #6 (COG connector)
+- SourceRef.infer() + kind-affinity registration is sufficient for v1 routing
+- No connector protocol changes needed — router operates alongside, not inside
+- Fallback +1000 penalty ensures kind matches always beat fallbacks
+
+**Design choices made:**
+- Router lives in quarry-core (zero deps, operates on protocol types only)
+- Lane: registry (remembers what connectors exist, selects among them)
+- Registration-based, not introspection-based (connectors don't need `can_handle`)
+- Priority is caller-controlled, not auto-derived
+- No execution — callers use the match to call materialize themselves
+
+**Summary:** Seventeen pressure tests. ConnectorRouter added to quarry-core.
+Connector protocol unchanged. 439 total tests passing.
