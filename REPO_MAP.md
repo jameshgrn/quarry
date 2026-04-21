@@ -35,7 +35,8 @@ quarry/                          # Monorepo root
 │   │       ├── clip_raster.py       # ClipRasterOperator (bounds + mask)
 │   │       ├── reproject.py         # ReprojectOperator (raster + vector CRS transform)
 │   │       ├── fill_depressions.py  # FillDepressionsOperator (Priority-Flood DEM preprocessing)
-│   │       └── d8_flow_direction.py # D8FlowDirectionOperator (steepest descent + flat resolution)
+│   │       ├── d8_flow_direction.py # D8FlowDirectionOperator (steepest descent + flat resolution)
+│   │       └── flow_accumulation.py # FlowAccumulationOperator (toposort upstream area)
 │   │
 │   └── quarry-registry/         # Deps: duckdb
 │       └── src/quarry_registry/
@@ -44,7 +45,7 @@ quarry/                          # Monorepo root
 ├── src/georuntime/              # Legacy prototype (DO NOT MODIFY — migration deferred)
 │
 ├── tests/
-│   ├── pressure_test/           # Substrate pressure tests (214 tests)
+│   ├── pressure_test/           # Substrate pressure tests (241 tests)
 │   │   ├── conftest.py          # PYTHONPATH setup for dev
 │   │   ├── test_end_to_end.py   # Kernel: connector → operator → executor (15)
 │   │   ├── test_registry.py     # Registry round-trips (18)
@@ -54,7 +55,8 @@ quarry/                          # Monorepo root
 │   │   ├── test_cog_connector.py # COG adversarial (24)
 │   │   ├── test_source_ref.py  # SourceRef contract (34)
 │   │   ├── test_fill_depressions.py # FillDepressions hydrology op (30)
-│   │   └── test_d8_flow_direction.py # D8 flow direction + chain tests (27)
+│   │   ├── test_d8_flow_direction.py # D8 flow direction + chain tests (27)
+│   │   └── test_flow_accumulation.py # Flow accumulation + full chain (27)
 │   └── fixtures/                # Test data (gitignored binaries)
 │
 └── hydrops/                     # RAIDING SOURCE — not a package, not integrated

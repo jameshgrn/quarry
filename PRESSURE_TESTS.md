@@ -243,3 +243,38 @@ domain incision. Zero contract changes. 187 total tests passing.
 
 **Summary:** Nine pressure tests. Fourth operator added (d8_flow_direction). Hydrology chain
 emerging: fill → D8. Zero contract changes. 214 total tests passing.
+
+## 10. Flow Accumulation Operator (2026-04-20)
+
+**Components:** FlowAccumulationOperator (third hydrology op, completes minimal spine)
+**Tests:** 27
+**Contract changes:** None
+
+**Proved:**
+- Topological sort (Kahn's) correctly accumulates upstream area
+- Linear chains produce monotonically increasing accumulation
+- Branching/confluence sums upstream contributions correctly
+- Conservation: total outlet accumulation = total valid cell count × weight
+- PIT cells retain self-weight, don't propagate downstream
+- Nodata cells excluded from accumulation entirely
+- Cycle detection rejects invalid flow grids (raises OperatorError)
+- Custom weight parameter scales accumulation linearly
+- Full chain: fill → D8 → accumulation on random 30x30 DEM (all checks pass)
+- Conservation holds on simple sloped DEM through full chain
+
+**Signals:**
+- Operator protocol continues to absorb domain-specific checks naturally
+- The conservation check is the first genuinely quantitative check in the system
+  (not just existence/validity, but a mathematical invariant)
+- Cycle detection as a hard failure (OperatorError) vs soft warning (pit check in D8)
+  shows the check severity model working
+- O(n) algorithm — linear in cell count, suitable for substrate
+
+**Debt observed:**
+- Same pure-Python loop performance debt as other hydrology ops
+- Weight parameter could eventually be a per-cell raster (e.g., rainfall-weighted
+  accumulation) — deferred until needed
+- No watershed delineation yet — natural extension of accumulation (threshold + trace)
+
+**Summary:** Ten pressure tests. Fifth operator (flow_accumulation). Hydrology spine complete:
+fill → D8 → accumulation. Zero contract changes. 241 total tests passing.
