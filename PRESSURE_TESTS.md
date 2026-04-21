@@ -456,3 +456,39 @@ cross-type operator. Zero contract changes. 361 total tests passing.
 
 **Summary:** Fifteen pressure tests. Eighth operator (build_cog). First representation/
 normalization operator. Zero contract changes. 383 total tests passing.
+
+## 16. SampleRaster Operator (2026-04-21)
+
+**Components:** SampleRasterOperator (raster + vector points → table)
+**Tests:** 22
+**Contract changes:** None
+
+**Proved:**
+- Point sampling returns exact pixel values at known locations
+- CRS mismatch rejected at validation
+- Points outside raster extent → NaN, row count preserved
+- Nodata cells (numeric and NaN) → NaN in output
+- Explicit band selection — pick subset of bands from multiband raster
+- Empty bands param samples all bands (default behavior)
+- Row count always equals input point count (stable invariant)
+- Empty input layer → zero rows, schema check WARN
+- Single point at pixel center → exact value
+- Point near raster boundary edge → valid sample
+- NaN nodata handling (isnan comparison)
+- Nodata override via params (overrides raster native nodata)
+- Schema always complete: point_id + band_N columns
+- Lineage records bands and nodata_value params
+- Output is TABLE (CSV), fresh metadata from actual file
+- point_id sequential 0..N-1 regardless of sample success
+
+**Signals:**
+- Operator protocol handles point-based sampling naturally — no protocol changes needed
+- TABLE output for point samples is correct choice (no geometry in output, just values)
+- ResourceScale.LIGHT appropriate (single rasterio read per point per band)
+
+**Debt observed:**
+- Per-point window read may be slow for large point sets — batch read with array indexing deferred
+- Only point geometries supported — centroid sampling for polygons/lines deferred
+
+**Summary:** Sixteen pressure tests. Ninth operator (sample_raster). Second raster+vector
+cross-type operator. Zero contract changes. 405 total tests passing.
