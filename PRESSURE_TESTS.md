@@ -572,3 +572,39 @@ Connector protocol unchanged. 439 total tests passing.
 
 **Summary:** Eighteen pressure tests. Tenth operator (rasterize_vector). First vector→raster
 operator. Zero contract changes. 464 total tests passing.
+
+## 19. CLI Adapter (2026-04-21)
+
+**Components:** quarry-cli package (argparse CLI over existing substrate)
+**Tests:** 19
+**Contract changes:** None
+
+**Lane:** adapter
+
+**Proved:**
+- `artifacts list` renders empty and populated registries correctly
+- `artifacts list --type` filters by ArtifactType
+- `artifacts show` displays full artifact detail; returns 1 for missing ID
+- `lineage` walks full ancestor chain; shows "no ancestors" for root artifacts
+- `lineage` returns 1 for missing artifact
+- `run hydrology` end-to-end: DEM in → filled + D8 + accumulation out + registry populated
+- `run hydrology` with `--no-gradient` and `--weight` flag variants
+- `run hydrology` returns 1 for missing DEM path
+- `--workspace` flag respected across all commands (registry + outputs land in specified dir)
+- Full round-trip: run → list → show → lineage through CLI entry point
+- No-command and missing-subcommand print help, return 0
+- Parser construction and prog name correct
+
+**Signals:**
+- Existing substrate primitives wire to CLI without any protocol changes
+- Registry, LocalFileConnector, HydrologyFlow, LocalExecutor compose cleanly from outside
+- argparse is sufficient — no click/typer dependency needed
+- CLI is pure glue: 200 lines, zero new abstractions
+
+**Debt observed:**
+- Only HydrologyFlow exposed via `run` — generic operator dispatch deferred
+- No JSON output mode — plain text tables only for v1
+- No `run list` / `run show` commands — deferred until someone needs run inspection from CLI
+
+**Summary:** Nineteen pressure tests. First adapter-lane package (quarry-cli).
+Zero contract changes. 483 total tests passing.

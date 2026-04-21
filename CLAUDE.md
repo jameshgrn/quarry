@@ -36,6 +36,7 @@ quarry/
     quarry-registry/   # DuckDB-backed artifact + run registry
     quarry-connectors/ # Connector implementations
     quarry-operators/  # Operator implementations
+    quarry-cli/        # CLI adapter (argparse, depends on all four above)
   src/georuntime/      # Legacy prototype (DO NOT MODIFY)
 ```
 
@@ -87,6 +88,9 @@ just tree          # Show package dependency graph
 - RasterizeVector only tested with polygons — line/point rasterization deferred
 - RasterizeVector single-band only — multi-band output deferred
 - RasterizeVector no all_touched option — deferred until needed
+- CLI only exposes HydrologyFlow via `run` — generic operator dispatch deferred
+- CLI plain text output only — JSON mode deferred until needed
+- CLI no `run list` / `run show` — deferred until run inspection needed from CLI
 
 ## Substrate Phase (v0.1.0) — COMPLETE
 
@@ -96,13 +100,20 @@ Substrate phase is complete. All criteria met:
 - 10 operators: ClipRaster, Reproject, FillDepressions, D8FlowDirection, FlowAccumulation, ZonalStats, SpatialJoin, BuildCOG, SampleRaster, RasterizeVector
 - Registry persists artifacts/runs/checks/lineage
 - End-to-end flow works (HydrologyFlow + zonal stats + COG export)
-- 481 tests passing
+- 483 tests passing (19 pressure test suites)
 
-## v0.2.0 Milestone — Consolidation & Legibility
+## v0.2.0 Milestone — Consolidation & Legibility — COMPLETE
 
 - Canonical example: `examples/watershed_analysis.py` (ingest→process→analyze→export→inspect)
 - Docs refreshed: AGENTS.md, CONTRACTS.md, REPO_MAP.md current with actual state
 - No new contracts, operators, or connectors — consolidation only
+
+## v0.3.0 Milestone — CLI Adapter
+
+- `quarry-cli` package: minimal CLI invocation surface (lane: adapter)
+- Commands: `quarry artifacts list/show`, `quarry lineage`, `quarry run hydrology`
+- Zero new dependencies (argparse only)
+- 19 pressure tests for CLI adapter
 
 ## What NOT to build yet
 

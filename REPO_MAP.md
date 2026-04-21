@@ -46,14 +46,18 @@ quarry/                          # Monorepo root
 │   │       ├── checks.py           # Standalone checks (InternalOutletCount)
 │   │       └── hydrology_flow.py   # HydrologyFlow (fill→D8→accumulation chain)
 │   │
-│   └── quarry-registry/         # Deps: duckdb
-│       └── src/quarry_registry/
-│           └── registry.py      # DuckDB persistence (artifacts, runs, checks, lineage)
+│   ├── quarry-registry/         # Deps: duckdb
+│   │   └── src/quarry_registry/
+│   │       └── registry.py      # DuckDB persistence (artifacts, runs, checks, lineage)
+│   │
+│   └── quarry-cli/              # Deps: quarry-core + connectors + operators + registry
+│       └── src/quarry_cli/
+│           └── main.py          # argparse CLI: artifacts list/show, lineage, run hydrology
 │
 ├── src/georuntime/              # Legacy prototype (DO NOT MODIFY — migration deferred)
 │
 ├── tests/
-│   ├── pressure_test/           # Substrate pressure tests (464 tests, 18 suites)
+│   ├── pressure_test/           # Substrate pressure tests (483 tests, 19 suites)
 │   │   ├── conftest.py          # PYTHONPATH setup for dev
 │   │   ├── test_end_to_end.py   # Kernel: connector → operator → executor (15)
 │   │   ├── test_registry.py     # Registry round-trips (18)
@@ -73,7 +77,8 @@ quarry/                          # Monorepo root
 │   │   ├── test_sample_raster.py # SampleRaster raster+points (22)
 │   │   ├── test_spatial_join.py # SpatialJoin vector×vector (20)
 │   │   ├── test_build_cog.py   # BuildCOG normalization (22)
-│   │   └── test_rasterize_vector.py # RasterizeVector polygon→raster (25)
+│   │   ├── test_rasterize_vector.py # RasterizeVector polygon→raster (25)
+│   │   └── test_cli.py          # CLI adapter: list/show/lineage/run hydrology (19)
 │   └── fixtures/                # Test data (gitignored binaries)
 │
 ├── examples/
@@ -92,6 +97,8 @@ quarry-core (zero deps)
 quarry-connectors (+ rasterio, fiona, pystac-client, psycopg, shapely)
 quarry-operators  (+ rasterio, fiona, shapely)
 quarry-registry   (+ duckdb)
+  ↑
+quarry-cli        (adapter — all four packages above)
 ```
 
-All implementation packages depend on quarry-core. No circular deps.
+All implementation packages depend on quarry-core. quarry-cli depends on all four. No circular deps.

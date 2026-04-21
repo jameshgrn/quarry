@@ -39,6 +39,7 @@ quarry-core = { workspace = true }
 quarry-connectors = { workspace = true }
 quarry-operators = { workspace = true }
 quarry-registry = { workspace = true }
+quarry-cli = { workspace = true }
 
 [dependency-groups]
 dev = [
