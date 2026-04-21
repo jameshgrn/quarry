@@ -41,6 +41,7 @@ quarry/                          # Monorepo root
 │   │       ├── zonal_stats.py       # ZonalStatsOperator (raster+vector → per-zone CSV stats)
 │   │       ├── spatial_join.py      # SpatialJoinOperator (vector×vector left join, intersects)
 │   │       ├── sample_raster.py      # SampleRasterOperator (raster+points → per-point CSV values)
+│   │       ├── rasterize_vector.py  # RasterizeVectorOperator (vector polygons → raster grid)
 │   │       ├── build_cog.py        # BuildCOGOperator (raster → COG normalization)
 │   │       ├── checks.py           # Standalone checks (InternalOutletCount)
 │   │       └── hydrology_flow.py   # HydrologyFlow (fill→D8→accumulation chain)
@@ -52,7 +53,7 @@ quarry/                          # Monorepo root
 ├── src/georuntime/              # Legacy prototype (DO NOT MODIFY — migration deferred)
 │
 ├── tests/
-│   ├── pressure_test/           # Substrate pressure tests (439 tests, 17 suites)
+│   ├── pressure_test/           # Substrate pressure tests (464 tests, 18 suites)
 │   │   ├── conftest.py          # PYTHONPATH setup for dev
 │   │   ├── test_end_to_end.py   # Kernel: connector → operator → executor (15)
 │   │   ├── test_registry.py     # Registry round-trips (18)
@@ -71,7 +72,8 @@ quarry/                          # Monorepo root
 │   │   ├── test_zonal_stats.py  # ZonalStats raster+vector (21)
 │   │   ├── test_sample_raster.py # SampleRaster raster+points (22)
 │   │   ├── test_spatial_join.py # SpatialJoin vector×vector (20)
-│   │   └── test_build_cog.py   # BuildCOG normalization (22)
+│   │   ├── test_build_cog.py   # BuildCOG normalization (22)
+│   │   └── test_rasterize_vector.py # RasterizeVector polygon→raster (25)
 │   └── fixtures/                # Test data (gitignored binaries)
 │
 └── hydrops/                     # RAIDING SOURCE — not a package, not integrated

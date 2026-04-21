@@ -528,3 +528,47 @@ cross-type operator. Zero contract changes. 405 total tests passing.
 
 **Summary:** Seventeen pressure tests. ConnectorRouter added to quarry-core.
 Connector protocol unchanged. 439 total tests passing.
+
+## 18. RasterizeVector Operator (2026-04-21)
+
+**Components:** RasterizeVectorOperator (vector polygons → raster grid)
+**Tests:** 25
+**Contract changes:** None
+
+**Proved:**
+- Constant burn: polygon burned at specified value, background at nodata
+- Attribute burn: per-feature numeric property burned, different polygons get different values
+- CRS preserved from vector input to output raster
+- Empty geometries skipped without crash; valid polygons still burned
+- Polygons partially outside extent clipped to grid — only in-grid pixels burned
+- Nodata/background: uncovered pixels == nodata value, covered pixels != nodata
+- Grid alignment: dimensions = ceil(extent_span / resolution), verified exact
+- Explicit extent overrides vector bounding box
+- No extent → derives from vector bounds automatically
+- Missing burn attribute → feature skipped, others still burned
+- Non-numeric burn attribute → feature skipped gracefully
+- Invalid resolution (zero/negative) rejected at validation
+- Invalid extent (degenerate) rejected at validation
+- Neither burn_value nor burn_attribute → validation error
+- Zero-feature vector → all-nodata raster (no crash)
+- Overlapping polygons → last-write-wins (rasterio default behavior)
+- Small resolution on large extent → large but valid grid
+- Wrong input type rejected (raster passed as vector)
+- Unmaterialized input rejected (lazy handle)
+- Lineage records all params (resolution, extent, burn_value, burn_attribute, nodata, dtype)
+- Output metadata fresh from actual file (not params echo)
+- All declared checks pass on happy path (crs_valid, dimensions_sane, nodata_background)
+
+**Signals:**
+- Operator protocol handles vector→raster conversion naturally — no protocol changes needed
+- Single VECTOR input, single RASTER output — simplest spec shape
+- rasterio.features.rasterize does the heavy lifting; operator adds artifact/lineage/check wrapping
+- dtype parameter exposes control over output precision (uint8 through float64)
+
+**Debt observed:**
+- Only polygon geometries tested — line/point rasterization deferred
+- No all_touched option (rasterio supports it) — deferred until needed
+- No multi-band output — single band only for v1
+
+**Summary:** Eighteen pressure tests. Tenth operator (rasterize_vector). First vector→raster
+operator. Zero contract changes. 464 total tests passing.

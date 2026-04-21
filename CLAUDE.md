@@ -84,13 +84,16 @@ just tree          # Show package dependency graph
 - SpatialJoin O(left×right) brute force — STRtree spatial index deferred until perf measured
 - SpatialJoin only supports `intersects` predicate — `contains`, `within`, `touches` deferred
 - BuildCOG only tested with GeoTIFF input — other rasterio formats untested
+- RasterizeVector only tested with polygons — line/point rasterization deferred
+- RasterizeVector single-band only — multi-band output deferred
+- RasterizeVector no all_touched option — deferred until needed
 
 ## Substrate Phase Definition of Done
 
 Substrate phase is complete when:
 - Core ontology remains stable (no breaking contract changes)
 - 3–5 connectors exist (currently: 4 — LocalFile, STAC, PostGIS, COG)
-- 3–5 operators exist (currently: 9 — ClipRaster, Reproject, FillDepressions, D8FlowDirection, FlowAccumulation, ZonalStats, SpatialJoin, BuildCOG, SampleRaster)
+- 3–5 operators exist (currently: 10 — ClipRaster, Reproject, FillDepressions, D8FlowDirection, FlowAccumulation, ZonalStats, SpatialJoin, BuildCOG, SampleRaster, RasterizeVector)
 - Registry persists artifacts/runs/checks/lineage (done)
 - One end-to-end flow works across local + one remote source (done)
 - No UI work beyond minimal debug CLI
