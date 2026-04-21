@@ -216,7 +216,13 @@ class D8FlowDirectionOperator:
         return OperatorResult(artifact=output_artifact, checks=checks)
 
     def declared_checks(self) -> list[str]:
-        return ["valid_code_set", "no_pits", "all_valid_assigned", "backing_accessible"]
+        return [
+            "valid_code_set",
+            "no_pits",
+            "no_internal_outlets",
+            "all_valid_assigned",
+            "backing_accessible",
+        ]
 
     def _run_checks(
         self,
@@ -265,6 +271,27 @@ class D8FlowDirectionOperator:
                     check_name="no_pits",
                     state=ValidationState.WARN,
                     message=f"{pit_count} interior pits detected (input may not be fully filled)",
+                )
+            )
+
+        # No internal outlets: valid cells flowing into nodata (not at domain boundary)
+        internal_outlets = _count_internal_outlets(flow, valid)
+        if internal_outlets == 0:
+            results.append(
+                CheckResult(
+                    check_name="no_internal_outlets",
+                    state=ValidationState.VALID,
+                    message="No flow leaks into nodata regions",
+                )
+            )
+        else:
+            results.append(
+                CheckResult(
+                    check_name="no_internal_outlets",
+                    state=ValidationState.WARN,
+                    message=(
+                        f"{internal_outlets} cells flow into nodata (potential mask inconsistency)"
+                    ),
                 )
             )
 
@@ -386,3 +413,32 @@ def _compute_d8(dem: np.ndarray, valid: np.ndarray) -> np.ndarray:
                         break
 
     return flow
+
+
+def _count_internal_outlets(flow: np.ndarray, valid: np.ndarray) -> int:
+    """Count valid cells whose D8 direction points into a nodata cell.
+
+    These are "internal outlets" — flow leaks into holes in the valid mask
+    rather than reaching the domain boundary. On a clean filled DEM this
+    should be zero; non-zero indicates nodata mask inconsistency or a
+    fill failure near nodata boundaries.
+
+    Excludes cells that flow off-grid (those are legitimate boundary outlets)
+    and cells with special codes (OUTLET, PIT, NODATA).
+    """
+    nrows, ncols = flow.shape
+    count = 0
+    for r in range(nrows):
+        for c in range(ncols):
+            if not valid[r, c]:
+                continue
+            d = int(flow[r, c])
+            if d < 0 or d > 7:
+                continue
+            nr = r + D8_DR[d]
+            nc = c + D8_DC[d]
+            if nr < 0 or nr >= nrows or nc < 0 or nc >= ncols:
+                continue
+            if not valid[nr, nc]:
+                count += 1
+    return count
