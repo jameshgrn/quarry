@@ -80,13 +80,16 @@ just tree          # Show package dependency graph
 - Legacy `src/georuntime/` — migration deferred
 - FillDepressions pure-Python loops — numba acceleration deferred until perf measured
 - Flat gradient uses naive BFS — Barnes et al. (2015) optimal flat resolution deferred
+- ZonalStats per-zone rasterization O(zones×pixels) — vectorized groupby deferred until perf measured
+- SpatialJoin O(left×right) brute force — STRtree spatial index deferred until perf measured
+- SpatialJoin only supports `intersects` predicate — `contains`, `within`, `touches` deferred
 
 ## Substrate Phase Definition of Done
 
 Substrate phase is complete when:
 - Core ontology remains stable (no breaking contract changes)
 - 3–5 connectors exist (currently: 4 — LocalFile, STAC, PostGIS, COG)
-- 3–5 operators exist (currently: 5 — ClipRaster, Reproject, FillDepressions, D8FlowDirection, FlowAccumulation)
+- 3–5 operators exist (currently: 7 — ClipRaster, Reproject, FillDepressions, D8FlowDirection, FlowAccumulation, ZonalStats, SpatialJoin)
 - Registry persists artifacts/runs/checks/lineage (done)
 - One end-to-end flow works across local + one remote source (done)
 - No UI work beyond minimal debug CLI

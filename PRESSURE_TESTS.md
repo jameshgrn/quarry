@@ -349,3 +349,40 @@ Zero contract changes. 283 total tests passing.
 
 **Summary:** Twelve pressure tests. 27 adversarial fixtures. One known limitation
 documented (disconnected valid regions). Zero contract changes. 320 total tests passing.
+
+## 13. SpatialJoin Operator (2026-04-21)
+
+**Components:** SpatialJoinOperator (vector × vector spatial join)
+**Tests:** 20
+**Contract changes:** None
+
+**Proved:**
+- Left join semantics: all left features preserved, unmatched get null right attrs
+- One-to-many: left duplicated per matching right (correct cardinality)
+- Many-to-many: cross-product of overlapping pairs (2×2 → 4 output)
+- No-overlap: left features kept with null right columns
+- Empty geometries: preserved in output, treated as no-match
+- Empty right layer: left features pass through with no right columns
+- CRS mismatch rejected at validation
+- Schema collision: colliding right columns renamed with `_right` suffix
+- Point-in-polygon: intersects predicate handles mixed geometry types
+- Unsupported predicate rejected at validation
+- Output is VECTOR (preserves geometry), not TABLE
+- Fresh metadata from actual output file
+- Lineage records predicate and collision renames
+- Left join invariant: output count >= left count (check enforced)
+
+**Signals:**
+- Operator protocol absorbs vector-vector ops naturally (no protocol changes needed)
+- OperatorSpec with two VECTOR inputs works cleanly (same pattern as ZonalStats raster+vector)
+- Schema collision is a WARN not INVALID — resolved automatically, flagged for awareness
+- GeoJSON driver discards schema on empty layers — operator handles gracefully
+
+**Debt observed:**
+- Only `intersects` predicate supported (v1). `contains`, `within`, `touches` deferred.
+- Right features loaded into memory (no spatial index). O(left × right) — acceptable
+  for substrate, spatial index (STRtree) deferred until perf measured.
+- No inner/right/cross join modes — left join only for v1.
+
+**Summary:** Thirteen pressure tests. Seventh operator (spatial_join). First vector×vector
+operator. Zero contract changes. 361 total tests passing.
