@@ -386,3 +386,36 @@ documented (disconnected valid regions). Zero contract changes. 320 total tests 
 
 **Summary:** Thirteen pressure tests. Seventh operator (spatial_join). First vector×vector
 operator. Zero contract changes. 361 total tests passing.
+
+## 14. ZonalStats Operator (2026-04-21)
+
+**Components:** ZonalStatsOperator (raster + vector → table)
+**Tests:** 21
+**Contract changes:** None
+
+**Proved:**
+- Per-zone raster statistics (count, sum, mean, min, max, std) correct on hand-verifiable grids
+- CRS mismatch rejected at validation
+- Empty geometries produce NaN rows, row count preserved
+- All-nodata zone produces NaN row
+- Partial overlap — stats computed only for covered pixels
+- Zone fully outside raster → NaN row
+- Schema always complete — all stat columns present regardless of data
+- Row count always equals input feature count (stable)
+- Single-pixel zone returns exact pixel value
+- Multi-band raster — band param selects correct band
+- Nodata pixels excluded (both numeric and NaN nodata)
+- zone_id_field extracts zone ID from feature properties
+- Lineage records operation params (band, zone_id_field, stat_columns)
+- Output is TABLE (CSV), fresh metadata from actual file
+
+**Signals:**
+- Operator protocol handles mixed-type inputs (RASTER + VECTOR) cleanly
+- OperatorSpec with two different input types works naturally
+- Per-zone rasterization via geometry_mask is correct but O(zones × pixels)
+
+**Debt observed:**
+- Per-zone rasterization is O(zones × pixels) — vectorized groupby deferred until perf measured
+
+**Summary:** Fourteen pressure tests. Sixth operator (zonal_stats). First raster+vector
+cross-type operator. Zero contract changes. 382 total tests passing.
