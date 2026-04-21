@@ -39,6 +39,7 @@ quarry/                          # Monorepo root
 │   │       ├── flow_accumulation.py # FlowAccumulationOperator (toposort upstream area)
 │   │       ├── zonal_stats.py       # ZonalStatsOperator (raster+vector → per-zone CSV stats)
 │   │       ├── spatial_join.py      # SpatialJoinOperator (vector×vector left join, intersects)
+│   │       ├── build_cog.py        # BuildCOGOperator (raster → COG normalization)
 │   │       ├── checks.py           # Standalone checks (InternalOutletCount)
 │   │       └── hydrology_flow.py   # HydrologyFlow (fill→D8→accumulation chain)
 │   │
@@ -49,7 +50,7 @@ quarry/                          # Monorepo root
 ├── src/georuntime/              # Legacy prototype (DO NOT MODIFY — migration deferred)
 │
 ├── tests/
-│   ├── pressure_test/           # Substrate pressure tests (361 tests, 14 suites)
+│   ├── pressure_test/           # Substrate pressure tests (383 tests, 15 suites)
 │   │   ├── conftest.py          # PYTHONPATH setup for dev
 │   │   ├── test_end_to_end.py   # Kernel: connector → operator → executor (15)
 │   │   ├── test_registry.py     # Registry round-trips (18)
@@ -65,7 +66,8 @@ quarry/                          # Monorepo root
 │   │   ├── test_hydrology_adversarial.py # 27 pathological DEM fixtures
 │   │   ├── test_internal_outlet_check.py # Standalone check tests
 │   │   ├── test_zonal_stats.py  # ZonalStats raster+vector (21)
-│   │   └── test_spatial_join.py # SpatialJoin vector×vector (20)
+│   │   ├── test_spatial_join.py # SpatialJoin vector×vector (20)
+│   │   └── test_build_cog.py   # BuildCOG normalization (22)
 │   └── fixtures/                # Test data (gitignored binaries)
 │
 └── hydrops/                     # RAIDING SOURCE — not a package, not integrated

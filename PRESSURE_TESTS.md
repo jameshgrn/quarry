@@ -419,3 +419,40 @@ operator. Zero contract changes. 361 total tests passing.
 
 **Summary:** Fourteen pressure tests. Sixth operator (zonal_stats). First raster+vector
 cross-type operator. Zero contract changes. 361 total tests passing.
+
+## 15. BuildCOG Operator (2026-04-21)
+
+**Components:** BuildCOGOperator (raster → COG normalization)
+**Tests:** 22
+**Contract changes:** None
+
+**Proved:**
+- Non-COG GeoTIFF → valid COG (tiled + overviews)
+- Base resolution pixel values identical after COG build (lossless)
+- CRS preserved unchanged
+- Nodata preserved (numeric and NaN)
+- No-nodata rasters handled correctly (None → None)
+- Multi-band preservation (count and per-band data)
+- Already-a-COG idempotence — valid COG in, valid COG out, data unchanged
+- Tiny raster smaller than blocksize — no crash, data preserved
+- Overview levels computed and present on large rasters
+- Compression applied — deflate output smaller than uncompressed
+- Lazy artifact rejected at validation
+- Unsupported compression rejected at validation
+- Lineage records blocksize, compress, overview_resampling
+- Fresh metadata from actual output file
+
+**Signals:**
+- Operator protocol handles representation transforms naturally — no protocol changes needed
+- "Same data, different storage contract" fits cleanly under existing Operator semantics
+- BuildCOG completes the ingest → process → export story
+- The distinction between semantic and representation transforms is visible but
+  does not require formalization — both are just Operators
+
+**Debt observed:**
+- Only GeoTIFF input tested — other rasterio-readable formats (NetCDF, HDF5) untested
+- COG layout uses rasterio.shutil.copy with copy_src_overviews — relies on GDAL COG driver behavior
+- No tile-level validation (checking internal IFD ordering) — trusting GDAL's COG layout
+
+**Summary:** Fifteen pressure tests. Eighth operator (build_cog). First representation/
+normalization operator. Zero contract changes. 383 total tests passing.
