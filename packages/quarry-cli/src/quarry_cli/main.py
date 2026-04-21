@@ -393,6 +393,96 @@ def cmd_run_zonal(args) -> int:
 
 
 # ---------------------------------------------------------------------------
+# run sample
+# ---------------------------------------------------------------------------
+
+
+def cmd_run_sample(args) -> int:
+    from quarry_connectors.local_file import LocalFileConnector
+    from quarry_core.executors.local import LocalExecutor
+    from quarry_operators.sample_raster import SampleRasterOperator, SampleRasterParams
+    from quarry_registry.registry import Registry
+
+    raster_path = Path(args.raster).resolve()
+    if not raster_path.exists():
+        print(f"Raster file not found: {raster_path}", file=sys.stderr)
+        return 1
+
+    points_path = Path(args.points).resolve()
+    if not points_path.exists():
+        print(f"Points file not found: {points_path}", file=sys.stderr)
+        return 1
+
+    workspace = _resolve_workspace(args)
+
+    # Materialize both inputs through connector
+    connector = LocalFileConnector()
+    print(f"Materializing raster: {raster_path}")
+    raster_artifact = connector.materialize(str(raster_path), workspace).artifact
+
+    print(f"Materializing points: {points_path}")
+    points_artifact = connector.materialize(str(points_path), workspace).artifact
+
+    # Set up executor + registry
+    executor = LocalExecutor()
+    registry = Registry(workspace)
+    registry.save_artifact(raster_artifact)
+    registry.save_artifact(points_artifact)
+
+    # Parse bands
+    bands: list[int] = []
+    if args.bands:
+        try:
+            bands = [int(b.strip()) for b in args.bands.split(",")]
+        except ValueError:
+            print(
+                f"Invalid --bands value: {args.bands!r} (expected comma-separated integers)",
+                file=sys.stderr,
+            )
+            return 1
+
+    # Output path
+    output_dir = workspace / "sample"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = Path(args.output).resolve() if args.output else output_dir / "sample_raster.csv"
+
+    params = SampleRasterParams(
+        output_path=str(output_path),
+        bands=bands,
+        nodata_value=args.nodata,
+    )
+
+    print(f"Running sample raster → {output_path}")
+    try:
+        run_record = executor.submit(
+            SampleRasterOperator(),
+            [raster_artifact, points_artifact],
+            params,
+        )
+    except Exception as e:
+        print(f"FAILED: {e}", file=sys.stderr)
+        return 1
+
+    # Persist
+    registry.save_run(run_record)
+
+    # Report
+    output = run_record.output.artifact
+    uri = output.backing.uri if output.backing else "?"
+    print(f"\nCompleted (1 step, {len(run_record.checks)} checks)")
+    print(f"  {output.name:<25} → {uri}")
+
+    invalid = [c for c in run_record.checks if c.state.value == "invalid"]
+    if invalid:
+        print(f"\nWARNING: {len(invalid)} invalid check(s):")
+        for c in invalid:
+            print(f"  [{c.check_name}] {c.message}")
+
+    print(f"\nRegistry: {registry.db_path}")
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # Parser
 # ---------------------------------------------------------------------------
 
@@ -487,6 +577,22 @@ def build_parser() -> argparse.ArgumentParser:
     zonal.add_argument("--band", type=int, default=1, help="Raster band to analyze (default: 1)")
     zonal.add_argument("--zone-id-field", default=None, help="Feature property to use as zone ID")
     zonal.set_defaults(func=cmd_run_zonal)
+
+    # run sample
+    sample = run_sub.add_parser("sample", help="Sample raster values at point locations → CSV")
+    sample.add_argument("--raster", required=True, help="Path to input raster")
+    sample.add_argument(
+        "--points", required=True, help="Path to point vector (GeoPackage, shapefile)"
+    )
+    sample.add_argument("--workspace", default=".", help="Workspace directory (default: .)")
+    sample.add_argument("--bands", default=None, help="Comma-separated band indices (default: all)")
+    sample.add_argument(
+        "--output",
+        default=None,
+        help="Output CSV path (default: workspace/sample/sample_raster.csv)",
+    )
+    sample.add_argument("--nodata", type=float, default=None, help="Nodata value override")
+    sample.set_defaults(func=cmd_run_sample)
 
     return parser
 

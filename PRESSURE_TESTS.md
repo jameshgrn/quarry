@@ -655,7 +655,7 @@ operator pattern through CLI. Zero contract changes. 495 total tests passing.
 - `runs list --status completed` filters correctly; `--status failed` returns empty on clean run
 - `runs list --limit 1` respects limit
 - `runs show <run-id>` displays full run detail: operator, status, timing, inputs, params, output, checks
-- Output artifact resolved via direct DB query (workaround for `get_run()` not reconstructing OperatorResult)
+- Output artifact displayed from `run.output.artifact` (registry now reconstructs OperatorResult)
 - Returns 1 for nonexistent run ID
 - `checks show <artifact-id>` displays checks for artifact with state, name, message, timestamp
 - `checks show <run-id>` displays checks for run
@@ -666,11 +666,72 @@ operator pattern through CLI. Zero contract changes. 495 total tests passing.
 
 **Signals:**
 - Registry already had `list_runs()`, `get_run()`, `get_checks()` — pure adapter work, no substrate changes
-- `get_run()` doesn't reconstruct `output` field — CLI works around via direct `output_artifact_id` query
+- `get_run()` now reconstructs `output` field — no adapter workarounds needed
 - Auto-detection of artifact vs run ID works cleanly for `checks show`
 
 **Debt observed:**
-- Registry `_row_to_run()` should reconstruct output OperatorResult for full fidelity
 - CLI plain text only — JSON output mode still deferred
 
 **Summary:** Twenty pressure tests. Three new CLI inspection commands. Zero contract changes. 515 total tests passing.
+
+## 22. Registry Run Output Reconstruction (2026-04-21)
+
+**Components:** Registry `_row_to_run()`, CLI `cmd_runs_show`
+**Tests:** 4 new (in test_registry.py)
+**Contract changes:** None
+
+**Proved:**
+- `get_run()` reconstructs `output` as `OperatorResult` with artifact matching original
+- Failed run (no output artifact) round-trips as `output=None`
+- Reconstructed `output.checks` match `run.checks`
+- `list_runs()` also reconstructs output on each RunRecord
+- CLI `runs show` uses `run.output.artifact` directly — no adapter workaround needed
+
+**Signals:**
+- Fix was surgical: add artifact lookup + OperatorResult wrapping in `_row_to_run()`
+- `OperatorResult.warnings`, `timing_seconds`, `metadata` are not persisted — ephemeral details, acceptable loss
+
+**Debt resolved:**
+- Registry `get_run()` output reconstruction — done
+- CLI `_get_output_artifact_id` workaround — removed
+
+**Summary:** Four new pressure tests. Debt burn-down. Zero contract changes. 519 total tests passing.
+
+## 23. CLI Sample Flow (2026-04-21)
+
+**Components:** `quarry run sample` CLI command (raster + point vector → CSV)
+**Tests:** 19
+**Contract changes:** None
+
+**Lane:** adapter
+
+**Proved:**
+- `run sample` end-to-end: raster + points → CSV output + registry populated
+- Output CSV has correct schema (point_id + band_N columns) and row count matches input points
+- Registry contains 3 artifacts (raster + points + output table)
+- Lineage: output table has 2 ancestors (raster + points)
+- `--bands` flag selects single or multiple bands (comma-separated)
+- No `--bands` flag → sample all bands (default behavior)
+- `--output` flag sets custom output CSV path
+- `--nodata` flag overrides raster native nodata
+- `--workspace` flag respected (output + registry land in specified dir)
+- Returns 1 for missing raster path
+- Returns 1 for missing points path
+- Returns 1 for invalid `--bands` value (non-integer)
+- Sampled values match expected raster cell values (uniform raster verification)
+- Points outside raster extent → NaN
+- Nodata pixels → NaN in output
+- Run persisted with operator_name=sample_raster, status=completed
+- Full round-trip: run sample → artifacts list → artifacts show → lineage
+- `runs show` displays params as key-value lines after sample run
+- `checks show` lists validation checks after sample run
+
+**Signals:**
+- Two-input operator (raster + vector points) wires to CLI identically to zonal pattern
+- Comma-separated `--bands` parsing is the only new CLI concern (vs zonal's single `--band`)
+- SampleRasterOperator exercises the same substrate pathway as ZonalStatsOperator
+
+**Debt observed:**
+- Generic operator dispatch still deferred — third hand-wired flow
+
+**Summary:** Twenty-three pressure tests. Third CLI flow (sample raster). Zero contract changes. 538 total tests passing.
