@@ -418,4 +418,4 @@ operator. Zero contract changes. 361 total tests passing.
 - Per-zone rasterization is O(zones × pixels) — vectorized groupby deferred until perf measured
 
 **Summary:** Fourteen pressure tests. Sixth operator (zonal_stats). First raster+vector
-cross-type operator. Zero contract changes. 382 total tests passing.
+cross-type operator. Zero contract changes. 361 total tests passing.

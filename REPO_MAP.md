@@ -36,7 +36,11 @@ quarry/                          # Monorepo root
 │   │       ├── reproject.py         # ReprojectOperator (raster + vector CRS transform)
 │   │       ├── fill_depressions.py  # FillDepressionsOperator (Priority-Flood DEM preprocessing)
 │   │       ├── d8_flow_direction.py # D8FlowDirectionOperator (steepest descent + flat resolution)
-│   │       └── flow_accumulation.py # FlowAccumulationOperator (toposort upstream area)
+│   │       ├── flow_accumulation.py # FlowAccumulationOperator (toposort upstream area)
+│   │       ├── zonal_stats.py       # ZonalStatsOperator (raster+vector → per-zone CSV stats)
+│   │       ├── spatial_join.py      # SpatialJoinOperator (vector×vector left join, intersects)
+│   │       ├── checks.py           # Standalone checks (InternalOutletCount)
+│   │       └── hydrology_flow.py   # HydrologyFlow (fill→D8→accumulation chain)
 │   │
 │   └── quarry-registry/         # Deps: duckdb
 │       └── src/quarry_registry/
@@ -45,7 +49,7 @@ quarry/                          # Monorepo root
 ├── src/georuntime/              # Legacy prototype (DO NOT MODIFY — migration deferred)
 │
 ├── tests/
-│   ├── pressure_test/           # Substrate pressure tests (241 tests)
+│   ├── pressure_test/           # Substrate pressure tests (361 tests, 14 suites)
 │   │   ├── conftest.py          # PYTHONPATH setup for dev
 │   │   ├── test_end_to_end.py   # Kernel: connector → operator → executor (15)
 │   │   ├── test_registry.py     # Registry round-trips (18)
@@ -56,7 +60,12 @@ quarry/                          # Monorepo root
 │   │   ├── test_source_ref.py  # SourceRef contract (34)
 │   │   ├── test_fill_depressions.py # FillDepressions hydrology op (30)
 │   │   ├── test_d8_flow_direction.py # D8 flow direction + chain tests (27)
-│   │   └── test_flow_accumulation.py # Flow accumulation + full chain (27)
+│   │   ├── test_flow_accumulation.py # Flow accumulation + full chain (27)
+│   │   ├── test_hydrology_flow.py # Hydrology chain composition (27+15)
+│   │   ├── test_hydrology_adversarial.py # 27 pathological DEM fixtures
+│   │   ├── test_internal_outlet_check.py # Standalone check tests
+│   │   ├── test_zonal_stats.py  # ZonalStats raster+vector (21)
+│   │   └── test_spatial_join.py # SpatialJoin vector×vector (20)
 │   └── fixtures/                # Test data (gitignored binaries)
 │
 └── hydrops/                     # RAIDING SOURCE — not a package, not integrated
