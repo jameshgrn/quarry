@@ -120,3 +120,4 @@ Substrate phase is complete when:
 - `REPO_MAP.md` — package ownership and file layout
 - `PRESSURE_TESTS.md` — test history and ontology evolution log
 - `AGENTS.md` — agent behavior rules and debt list
+- `HYDROLOGY_PACK.md` — D8 hydrology chain reference (operators, checks, invariants, limitations)

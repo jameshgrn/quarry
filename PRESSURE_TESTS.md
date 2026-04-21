@@ -278,3 +278,74 @@ emerging: fill → D8. Zero contract changes. 214 total tests passing.
 
 **Summary:** Ten pressure tests. Fifth operator (flow_accumulation). Hydrology spine complete:
 fill → D8 → accumulation. Zero contract changes. 241 total tests passing.
+
+## 11. Hydrology Flow Integration + InternalOutletCount (2026-04-20)
+
+**Components:** HydrologyFlow (chain composition), InternalOutletCount (standalone check)
+**Tests:** 42 (27 flow integration + 15 check)
+**Contract changes:** None
+
+**Proved:**
+- Full chain: fill → D8 → accumulation composes through Executor + Registry
+- Every intermediate artifact, run, check, and lineage edge persists correctly
+- Lineage graph walkable: accumulation → D8 → filled → input DEM
+- Conservation holds through full chain (pit DEM, sloped, random, custom weight)
+- Check propagation: all operator checks present in flow result and registry
+- Failure isolation: bad input stops chain at correct step, reports step name
+- Registry round-trip: artifacts/runs survive save→load cycle
+- Flow works without registry (pure execution mode)
+- InternalOutletCount standalone check agrees with D8 operator-internal check
+- Standalone check: zero false positives on clean grids, correctly detects nodata leaks
+- Check protocol compliance: name, description, returns CheckResult
+
+**Signals:**
+- HydrologyFlow validates the Flow lane concept — composition through executor works naturally
+- Standalone + operator-internal check duality works: same logic, different entry points
+- Registry cascading save handles multi-step chains without manual intervention
+- Failure isolation stops the chain cleanly — no partial output from failed steps
+
+**Debt observed:**
+- HydrologyFlow is hard-coded to three operators — no generic DAG composition yet
+- Registry save happens inside the flow — no transactional rollback on partial failure
+
+**Summary:** Eleven pressure tests. Hydrology chain composition + standalone check.
+Zero contract changes. 283 total tests passing.
+
+## 12. Adversarial DEM Fixtures (2026-04-20)
+
+**Components:** Full hydrology chain on 27 pathological DEM surfaces
+**Tests:** 27
+**Contract changes:** None
+
+**Proved:**
+- Tiny DEMs (2×2 through 5×1): hand-verifiable accumulation values correct
+- L-shaped nodata, nodata corners, boundary strip: chain handles irregular masks
+- Thin diagonal channel: D8 routes through 1-cell-wide diagonal paths
+- Sinuous channel: D8 handles winding drainage paths
+- Narrow valley: accumulation concentrates at valley floor
+- Raised rim with single spill point: all interior drains through constrained exit
+- Boundary shelf: flat resolution handles flat region AT the grid boundary
+- Nodata cross bisection: 4 disconnected quadrants each drain independently
+- Single valid cell in nodata sea: degenerate case handles correctly (acc=1)
+- Two adjacent valid cells: minimal drainage pair works (higher→lower)
+- 15×15 flat DEM: flat resolution assigns directions from interior to boundary
+- Checkerboard nodata: maximally fragmented mask doesn't crash chain
+- Scattered nodata holes: random 10% nodata on sloped surface preserves conservation
+- Corner-to-corner slope: diagonal drainage routes to SE corner correctly
+- Saddle point: flow splits between two valleys
+- Ridge line: flow splits east and west of ridge
+
+**Limitation documented:**
+- Priority-Flood cannot reach valid cells disconnected from grid boundary by nodata.
+  Island test documents this: chain completes, conservation holds, but interior pits
+  on disconnected islands remain unfilled. D8 assigns PIT codes. Not a bug — a known
+  algorithm boundary condition.
+
+**Signals:**
+- Conservation invariant holds across all 27 pathological surfaces (where applicable)
+- Flat resolution handles boundary shelves, single-spill-point plateaus
+- Nodata mask handling is robust across irregular shapes and fragmentation patterns
+- Degenerate single-cell and two-cell cases don't crash or produce NaN
+
+**Summary:** Twelve pressure tests. 27 adversarial fixtures. One known limitation
+documented (disconnected valid regions). Zero contract changes. 320 total tests passing.
