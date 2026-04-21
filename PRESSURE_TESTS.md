@@ -643,3 +643,34 @@ Zero contract changes. 483 total tests passing.
 
 **Summary:** Twenty pressure tests. Second CLI flow (zonal stats). Exercises two-input
 operator pattern through CLI. Zero contract changes. 495 total tests passing.
+
+## 21. CLI Inspection Commands (2026-04-21)
+
+**Components:** CLI adapter (runs list/show, checks show) + Registry
+**Tests:** 20
+**Contract changes:** None
+
+**Proved:**
+- `runs list` shows table of runs from registry with ID, operator, status, submitted, duration
+- `runs list --status completed` filters correctly; `--status failed` returns empty on clean run
+- `runs list --limit 1` respects limit
+- `runs show <run-id>` displays full run detail: operator, status, timing, inputs, params, output, checks
+- Output artifact resolved via direct DB query (workaround for `get_run()` not reconstructing OperatorResult)
+- Returns 1 for nonexistent run ID
+- `checks show <artifact-id>` displays checks for artifact with state, name, message, timestamp
+- `checks show <run-id>` displays checks for run
+- Returns 1 for nonexistent ID (neither artifact nor run)
+- Artifact with no checks returns 0 with "(no checks)" message
+- `runs` and `checks` with no subcommand return 0 (help)
+- Full round-trip: run hydrology → runs list → runs show → checks show
+
+**Signals:**
+- Registry already had `list_runs()`, `get_run()`, `get_checks()` — pure adapter work, no substrate changes
+- `get_run()` doesn't reconstruct `output` field — CLI works around via direct `output_artifact_id` query
+- Auto-detection of artifact vs run ID works cleanly for `checks show`
+
+**Debt observed:**
+- Registry `_row_to_run()` should reconstruct output OperatorResult for full fidelity
+- CLI plain text only — JSON output mode still deferred
+
+**Summary:** Twenty pressure tests. Three new CLI inspection commands. Zero contract changes. 515 total tests passing.

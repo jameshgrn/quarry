@@ -16,6 +16,16 @@ def _resolve_workspace(args) -> Path:
     return Path(args.workspace).resolve()
 
 
+def _get_output_artifact_id(registry, run_id: str) -> str | None:
+    """Read output_artifact_id directly from the runs table."""
+    conn = registry._connect()
+    try:
+        row = conn.execute("SELECT output_artifact_id FROM runs WHERE id = ?", [run_id]).fetchone()
+        return row[0] if row else None
+    finally:
+        conn.close()
+
+
 # ---------------------------------------------------------------------------
 # artifacts list
 # ---------------------------------------------------------------------------
@@ -126,6 +136,131 @@ def cmd_lineage(args) -> int:
         print()
 
     print(f"{len(chain)} ancestor(s)")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# runs list
+# ---------------------------------------------------------------------------
+
+
+def cmd_runs_list(args) -> int:
+    from quarry_core.executor import RunStatus
+    from quarry_registry.registry import Registry
+
+    registry = Registry(_resolve_workspace(args))
+    status_filter = RunStatus(args.status) if args.status else None
+    runs = registry.list_runs(status=status_filter, limit=args.limit)
+
+    if not runs:
+        print("No runs found.")
+        return 0
+
+    print(f"{'ID':<38} {'OPERATOR':<25} {'STATUS':<12} {'SUBMITTED':<18} {'DURATION'}")
+    print("-" * 110)
+    for r in runs:
+        submitted = r.submitted_at.strftime("%Y-%m-%d %H:%M") if r.submitted_at else "?"
+        dur = f"{r.duration_seconds:.1f}s" if r.duration_seconds is not None else "-"
+        print(f"{r.id:<38} {r.operator_name:<25} {r.status.value:<12} {submitted:<18} {dur}")
+
+    print(f"\n{len(runs)} run(s)")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# runs show
+# ---------------------------------------------------------------------------
+
+
+def cmd_runs_show(args) -> int:
+    from quarry_registry.registry import Registry
+
+    registry = Registry(_resolve_workspace(args))
+    run = registry.get_run(args.run_id)
+
+    if run is None:
+        print(f"Run not found: {args.run_id}", file=sys.stderr)
+        return 1
+
+    print(f"ID:        {run.id}")
+    print(f"Operator:  {run.operator_name}")
+    print(f"Status:    {run.status.value}")
+    print(f"Executor:  {run.executor_name or '-'}")
+    print(f"Submitted: {run.submitted_at}")
+    if run.started_at:
+        print(f"Started:   {run.started_at}")
+    if run.completed_at:
+        print(f"Completed: {run.completed_at}")
+    if run.duration_seconds is not None:
+        print(f"Duration:  {run.duration_seconds:.2f}s")
+
+    if run.input_ids:
+        print(f"\nInputs ({len(run.input_ids)}):")
+        for iid in run.input_ids:
+            print(f"  {iid}")
+
+    if run.params:
+        print("\nParams:")
+        for k, v in run.params.items():
+            print(f"  {k}: {v}")
+
+    # output not reconstructed on RunRecord; look up artifact directly
+    output_artifact = registry.get_artifact(_get_output_artifact_id(registry, run.id))
+    if output_artifact:
+        print("\nOutput:")
+        print(f"  {output_artifact.id}  {output_artifact.type.value}  {output_artifact.name}")
+
+    if run.checks:
+        print(f"\nChecks ({len(run.checks)}):")
+        for c in run.checks:
+            print(f"  [{c.state.value:>7}] {c.check_name}: {c.message}")
+
+    if run.error:
+        print(f"\nError: {run.error}")
+
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# checks show
+# ---------------------------------------------------------------------------
+
+
+def cmd_checks_show(args) -> int:
+    from quarry_registry.registry import Registry
+
+    registry = Registry(_resolve_workspace(args))
+    target_id = args.id
+
+    # Try as artifact first, then as run
+    artifact = registry.get_artifact(target_id)
+    run = registry.get_run(target_id)
+
+    if artifact is None and run is None:
+        print(f"No artifact or run found for: {target_id}", file=sys.stderr)
+        return 1
+
+    checks = registry.get_checks(
+        artifact_id=target_id if artifact else None,
+        run_id=target_id if run else None,
+    )
+
+    label = f"artifact {artifact.name}" if artifact else f"run {run.operator_name}"
+    print(f"Checks for {label} ({target_id}):")
+
+    if not checks:
+        print("  (no checks)")
+        return 0
+
+    print()
+    for c in checks:
+        ts = c.timestamp.strftime("%Y-%m-%d %H:%M") if c.timestamp else "?"
+        print(f"  [{c.state.value:>7}] {c.check_name}")
+        print(f"           {c.message}")
+        print(f"           {ts}")
+        print()
+
+    print(f"{len(checks)} check(s)")
     return 0
 
 
@@ -306,6 +441,37 @@ def build_parser() -> argparse.ArgumentParser:
     lin_parser.add_argument("artifact_id", help="Artifact ID")
     lin_parser.add_argument("--workspace", default=".", help="Workspace directory (default: .)")
     lin_parser.set_defaults(func=cmd_lineage)
+
+    # --- runs ---
+    runs_parser = subparsers.add_parser("runs", help="Inspect run records")
+    runs_sub = runs_parser.add_subparsers(dest="runs_command")
+
+    # runs list
+    runs_list = runs_sub.add_parser("list", help="List runs")
+    runs_list.add_argument("--workspace", default=".", help="Workspace directory (default: .)")
+    runs_list.add_argument(
+        "--status",
+        choices=["pending", "running", "completed", "failed", "cancelled"],
+        help="Filter by status",
+    )
+    runs_list.add_argument("--limit", type=int, default=100, help="Max results (default: 100)")
+    runs_list.set_defaults(func=cmd_runs_list)
+
+    # runs show
+    runs_show = runs_sub.add_parser("show", help="Show run details")
+    runs_show.add_argument("run_id", help="Run ID")
+    runs_show.add_argument("--workspace", default=".", help="Workspace directory (default: .)")
+    runs_show.set_defaults(func=cmd_runs_show)
+
+    # --- checks ---
+    checks_parser = subparsers.add_parser("checks", help="Inspect validation checks")
+    checks_sub = checks_parser.add_subparsers(dest="checks_command")
+
+    # checks show
+    checks_show = checks_sub.add_parser("show", help="Show checks for an artifact or run")
+    checks_show.add_argument("id", help="Artifact ID or Run ID")
+    checks_show.add_argument("--workspace", default=".", help="Workspace directory (default: .)")
+    checks_show.set_defaults(func=cmd_checks_show)
 
     # --- run ---
     run_parser = subparsers.add_parser("run", help="Execute a flow")

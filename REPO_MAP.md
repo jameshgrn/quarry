@@ -79,7 +79,8 @@ quarry/                          # Monorepo root
 │   │   ├── test_build_cog.py   # BuildCOG normalization (22)
 │   │   ├── test_rasterize_vector.py # RasterizeVector polygon→raster (25)
 │   │   ├── test_cli.py          # CLI adapter: list/show/lineage/run hydrology (19)
-│   │   └── test_cli_zonal.py    # CLI adapter: run zonal end-to-end (12)
+│   │   ├── test_cli_zonal.py    # CLI adapter: run zonal end-to-end (12)
+│   │   └── test_cli_inspection.py # CLI adapter: runs list/show, checks show (20)
 │   └── fixtures/                # Test data (gitignored binaries)
 │
 ├── examples/
