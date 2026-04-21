@@ -123,9 +123,15 @@ Persistent memory. DuckDB-backed.
 - **get_full_lineage()** walks the full ancestor chain recursively.
 - Artifacts loaded from registry carry their checks (loaded from checks table).
 
-## Flow (not yet implemented)
+## Flow
 
-Composition of operators. Will be a DAG of operator steps with dependency edges.
+Composition of operators into a multi-step chain with registry persistence.
+
+- **HydrologyFlow** is the first implementation: fill → D8 → accumulation.
+- Each step: build operator + params → submit to executor → persist RunRecord to registry → feed output to next step.
+- Flow result carries all intermediate artifacts, runs, checks, and failure info.
+- Registry persistence is optional — flows can run without a registry for testing.
+- Generic DAG-based flow composition is not yet implemented — HydrologyFlow is purpose-built.
 
 ## Adapter (not yet implemented)
 

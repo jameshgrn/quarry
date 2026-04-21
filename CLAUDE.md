@@ -88,15 +88,21 @@ just tree          # Show package dependency graph
 - RasterizeVector single-band only — multi-band output deferred
 - RasterizeVector no all_touched option — deferred until needed
 
-## Substrate Phase Definition of Done
+## Substrate Phase (v0.1.0) — COMPLETE
 
-Substrate phase is complete when:
-- Core ontology remains stable (no breaking contract changes)
-- 3–5 connectors exist (currently: 4 — LocalFile, STAC, PostGIS, COG)
-- 3–5 operators exist (currently: 10 — ClipRaster, Reproject, FillDepressions, D8FlowDirection, FlowAccumulation, ZonalStats, SpatialJoin, BuildCOG, SampleRaster, RasterizeVector)
-- Registry persists artifacts/runs/checks/lineage (done)
-- One end-to-end flow works across local + one remote source (done)
-- No UI work beyond minimal debug CLI
+Substrate phase is complete. All criteria met:
+- Core ontology stable — zero contract changes across 18 pressure test suites
+- 4 connectors: LocalFile, STAC, PostGIS, COG
+- 10 operators: ClipRaster, Reproject, FillDepressions, D8FlowDirection, FlowAccumulation, ZonalStats, SpatialJoin, BuildCOG, SampleRaster, RasterizeVector
+- Registry persists artifacts/runs/checks/lineage
+- End-to-end flow works (HydrologyFlow + zonal stats + COG export)
+- 481 tests passing
+
+## v0.2.0 Milestone — Consolidation & Legibility
+
+- Canonical example: `examples/watershed_analysis.py` (ingest→process→analyze→export→inspect)
+- Docs refreshed: AGENTS.md, CONTRACTS.md, REPO_MAP.md current with actual state
+- No new contracts, operators, or connectors — consolidation only
 
 ## What NOT to build yet
 
@@ -128,3 +134,4 @@ Substrate phase is complete when:
 - `PRESSURE_TESTS.md` — test history and ontology evolution log
 - `AGENTS.md` — agent behavior rules and debt list
 - `HYDROLOGY_PACK.md` — D8 hydrology chain reference (operators, checks, invariants, limitations)
+- `examples/watershed_analysis.py` — canonical end-to-end workflow (ingest→process→analyze→export→inspect)

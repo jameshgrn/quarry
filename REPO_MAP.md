@@ -76,6 +76,9 @@ quarry/                          # Monorepo root
 │   │   └── test_rasterize_vector.py # RasterizeVector polygon→raster (25)
 │   └── fixtures/                # Test data (gitignored binaries)
 │
+├── examples/
+│   └── watershed_analysis.py    # Canonical end-to-end: ingest→hydro→zonal→COG→lineage
+│
 └── hydrops/                     # RAIDING SOURCE — not a package, not integrated
                                  # Tiled hydrology harness (checks, COG I/O, schedulers)
                                  # Extract one piece at a time; pressure-test against contracts

@@ -41,13 +41,19 @@ Preserve the ontology. Do not invent parallel abstractions.
 
 ## Debt list (tolerated, not fires)
 
-- `source_ref: str` in Connector protocol — SourceRef type exists but protocol not updated (backward compat)
+- `source_ref: str` in Connector protocol — SourceRef type exists, ConnectorRouter handles routing, protocol update deferred
 - `OperatorSpec.output_type` is singular — will need multi-output when tile-splitting appears
 - `Lineage` on Artifact is a single object — may need append-only for multi-stage provenance
 - Legacy `src/georuntime/` — migration deferred until packages are stable
-- No Flow or Adapter implementations yet
-- Connector selection/routing — 4 connectors exist, no dispatcher for auto-routing
-- `BackingStoreKind.REMOTE_URI` unused — may be dead weight
+- FillDepressions pure-Python loops — numba acceleration deferred until perf measured
+- Flat gradient uses naive BFS — Barnes et al. (2015) optimal flat resolution deferred
+- ZonalStats per-zone rasterization O(zones×pixels) — vectorized groupby deferred until perf measured
+- SpatialJoin O(left×right) brute force — STRtree spatial index deferred until perf measured
+- SpatialJoin only supports `intersects` predicate — `contains`, `within`, `touches` deferred
+- BuildCOG only tested with GeoTIFF input — other rasterio formats untested
+- RasterizeVector only tested with polygons — line/point rasterization deferred
+- RasterizeVector single-band only — multi-band output deferred
+- RasterizeVector no all_touched option — deferred until needed
 
 ## Raiding source: hydrops/
 
@@ -55,15 +61,19 @@ Preserve the ontology. Do not invent parallel abstractions.
 
 **Extractable targets (ranked by substrate value):**
 1. Check patterns — backend compliance, conservation residuals, seam mismatch detection
-2. COG connector / I/O accounting — COGRaster, windowed reads, byte metrics
-3. Hydrology operators — D8 flow, toposort accumulation, depression fill
-4. Tile scheduler concepts — TileStageGraph, memory-bounded batching (future executor)
+2. Tile scheduler concepts — TileStageGraph, memory-bounded batching (future executor)
 
 **Rules:** Extract one piece at a time. Rewrite to fit quarry contracts. Pressure-test before merging. Do NOT import wholesale.
 
-## Immediate roadmap
+## Current status (v0.2.0)
 
-1. PostGIS connector (adversarial: connection-oriented, schema/table refs, query-based)
-2. If PostGIS stresses source_ref → introduce SourceRef type in quarry-core
-3. Continue connector/operator expansion (3-5 of each for substrate phase)
-4. Only then: richer flows, second executor, adapter surfaces
+Substrate phase is complete. The current surface:
+- 4 connectors: LocalFile, STAC, PostGIS, COG
+- 10 operators: ClipRaster, Reproject, FillDepressions, D8FlowDirection, FlowAccumulation, ZonalStats, SpatialJoin, BuildCOG, SampleRaster, RasterizeVector
+- 1 flow: HydrologyFlow (fill→D8→accumulation)
+- 1 executor: LocalExecutor
+- ConnectorRouter for source-ref-based connector selection
+- DuckDB-backed registry with lineage graph
+- 481 tests passing, 18 pressure test suites, zero contract changes
+
+See `examples/watershed_analysis.py` for a canonical end-to-end workflow.
