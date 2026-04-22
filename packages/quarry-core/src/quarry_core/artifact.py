@@ -30,10 +30,7 @@ class BackingStoreKind(Enum):
     """How an artifact is physically stored."""
 
     LOCAL_FILE = "local_file"
-    REMOTE_URI = "remote_uri"
     LAZY_HANDLE = "lazy_handle"  # metadata known, data not yet fetched
-    MEMORY = "memory"  # in-process only, not persisted
-    DUCKDB = "duckdb"  # table stored in DuckDB
     POSTGIS = "postgis"  # table/layer in PostGIS
 
 
@@ -140,11 +137,7 @@ class Artifact:
         """Whether the artifact's data is locally accessible."""
         if self.backing is None:
             return False
-        return self.backing.kind in (
-            BackingStoreKind.LOCAL_FILE,
-            BackingStoreKind.MEMORY,
-            BackingStoreKind.DUCKDB,
-        )
+        return self.backing.kind == BackingStoreKind.LOCAL_FILE
 
     def with_check(self, result: CheckResult) -> Artifact:
         """Return a new artifact with an additional check result."""

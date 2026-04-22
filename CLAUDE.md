@@ -91,6 +91,8 @@ just tree          # Show package dependency graph
 - CLI exposes hydrology + zonal + sample + rasterize flows — generic operator dispatch deferred
 - CLI plain text output only — JSON mode deferred until needed
 - Registry `get_run()` does not persist `OperatorResult.warnings`, `timing_seconds`, or `metadata` — ephemeral execution details lost on round-trip
+- Operator string params (`compress`, `resampling`, `predicate`) validated against hardcoded tuples — `Literal` types deferred (large surface area)
+- `HydrologyFlow._execute_step` mutates input lists AND returns a value — mixed contract, single caller, low urgency
 
 ## Substrate Phase (v0.1.0) — COMPLETE
 
