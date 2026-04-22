@@ -483,6 +483,121 @@ def cmd_run_sample(args) -> int:
 
 
 # ---------------------------------------------------------------------------
+# run rasterize
+# ---------------------------------------------------------------------------
+
+
+def cmd_run_rasterize(args) -> int:
+    from quarry_connectors.local_file import LocalFileConnector
+    from quarry_core.executors.local import LocalExecutor
+    from quarry_operators.rasterize_vector import (
+        RasterizeVectorOperator,
+        RasterizeVectorParams,
+    )
+    from quarry_registry.registry import Registry
+
+    vector_path = Path(args.vector).resolve()
+    if not vector_path.exists():
+        print(f"Vector file not found: {vector_path}", file=sys.stderr)
+        return 1
+
+    workspace = _resolve_workspace(args)
+
+    # Materialize input through connector
+    connector = LocalFileConnector()
+    print(f"Materializing vector: {vector_path}")
+    vector_artifact = connector.materialize(str(vector_path), workspace).artifact
+
+    # Set up executor + registry
+    executor = LocalExecutor()
+    registry = Registry(workspace)
+    registry.save_artifact(vector_artifact)
+
+    # Output path
+    output_dir = workspace / "rasterize"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = Path(args.output).resolve() if args.output else output_dir / "rasterized.tif"
+
+    # Parse resolution
+    try:
+        parts = [float(x.strip()) for x in args.resolution.split(",")]
+    except ValueError:
+        print(
+            f"Invalid --resolution value: {args.resolution!r} (expected x_res,y_res)",
+            file=sys.stderr,
+        )
+        return 1
+    if len(parts) == 1:
+        resolution = (parts[0], parts[0])
+    elif len(parts) == 2:
+        resolution = (parts[0], parts[1])
+    else:
+        print(
+            f"Invalid --resolution value: {args.resolution!r} (expected x_res or x_res,y_res)",
+            file=sys.stderr,
+        )
+        return 1
+
+    # Parse extent
+    extent = None
+    if args.extent:
+        try:
+            extent_parts = [float(x.strip()) for x in args.extent.split(",")]
+        except ValueError:
+            print(
+                f"Invalid --extent value: {args.extent!r} (expected xmin,ymin,xmax,ymax)",
+                file=sys.stderr,
+            )
+            return 1
+        if len(extent_parts) != 4:
+            print(
+                f"Invalid --extent value: {args.extent!r} (expected xmin,ymin,xmax,ymax)",
+                file=sys.stderr,
+            )
+            return 1
+        extent = (extent_parts[0], extent_parts[1], extent_parts[2], extent_parts[3])
+
+    params = RasterizeVectorParams(
+        output_path=str(output_path),
+        resolution=resolution,
+        extent=extent,
+        burn_value=args.burn_value,
+        burn_attribute=args.burn_attribute,
+        nodata=args.nodata,
+        dtype=args.dtype,
+    )
+
+    print(f"Running rasterize → {output_path}")
+    try:
+        run_record = executor.submit(
+            RasterizeVectorOperator(),
+            [vector_artifact],
+            params,
+        )
+    except Exception as e:
+        print(f"FAILED: {e}", file=sys.stderr)
+        return 1
+
+    # Persist
+    registry.save_run(run_record)
+
+    # Report
+    output = run_record.output.artifact
+    uri = output.backing.uri if output.backing else "?"
+    print(f"\nCompleted (1 step, {len(run_record.checks)} checks)")
+    print(f"  {output.name:<25} → {uri}")
+
+    invalid = [c for c in run_record.checks if c.state.value == "invalid"]
+    if invalid:
+        print(f"\nWARNING: {len(invalid)} invalid check(s):")
+        for c in invalid:
+            print(f"  [{c.check_name}] {c.message}")
+
+    print(f"\nRegistry: {registry.db_path}")
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # Parser
 # ---------------------------------------------------------------------------
 
@@ -503,7 +618,7 @@ def build_parser() -> argparse.ArgumentParser:
     art_list.add_argument("--workspace", default=".", help="Workspace directory (default: .)")
     art_list.add_argument(
         "--type",
-        choices=["raster", "vector", "table", "temporal_stack", "tile_set", "model", "point_cloud"],
+        choices=["raster", "vector", "table"],
         help="Filter by artifact type",
     )
     art_list.add_argument("--limit", type=int, default=100, help="Max results (default: 100)")
@@ -593,6 +708,35 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sample.add_argument("--nodata", type=float, default=None, help="Nodata value override")
     sample.set_defaults(func=cmd_run_sample)
+
+    # run rasterize
+    rasterize = run_sub.add_parser(
+        "rasterize", help="Rasterize vector polygons → GeoTIFF (constant or attribute burn)"
+    )
+    rasterize.add_argument("--vector", required=True, help="Path to input polygon vector")
+    rasterize.add_argument("--workspace", default=".", help="Workspace directory (default: .)")
+    rasterize.add_argument(
+        "--resolution",
+        required=True,
+        help="Pixel resolution: x_res or x_res,y_res (CRS units)",
+    )
+    rasterize.add_argument(
+        "--burn-value", type=float, default=1.0, help="Constant burn value (default: 1.0)"
+    )
+    rasterize.add_argument(
+        "--burn-attribute", default=None, help="Feature property for per-feature burn value"
+    )
+    rasterize.add_argument("--nodata", type=float, default=0.0, help="Nodata value (default: 0.0)")
+    rasterize.add_argument("--dtype", default="float32", help="Output dtype (default: float32)")
+    rasterize.add_argument(
+        "--output",
+        default=None,
+        help="Output GeoTIFF path (default: workspace/rasterize/rasterized.tif)",
+    )
+    rasterize.add_argument(
+        "--extent", default=None, help="Output extent: xmin,ymin,xmax,ymax (default: vector bounds)"
+    )
+    rasterize.set_defaults(func=cmd_run_rasterize)
 
     return parser
 

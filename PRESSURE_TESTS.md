@@ -735,3 +735,46 @@ operator pattern through CLI. Zero contract changes. 495 total tests passing.
 - Generic operator dispatch still deferred — third hand-wired flow
 
 **Summary:** Twenty-three pressure tests. Third CLI flow (sample raster). Zero contract changes. 538 total tests passing.
+
+## 24. CLI Run Rasterize (2026-04-21)
+
+**Components:** CLI `run rasterize` + RasterizeVectorOperator + LocalFileConnector + LocalExecutor + Registry
+**Tests:** 26
+**Contract changes:** None
+
+**Proved:**
+- `run rasterize` end-to-end: vector → GeoTIFF output + registry populated
+- Constant burn: default burn_value=1.0 and custom burn_value
+- Attribute burn: per-feature values from a property field
+- Bad attribute name → all features skipped → raster filled with nodata (graceful)
+- Empty vector → raises at connector (fiona can't compute bounds for empty file)
+- `--resolution` accepts single value (symmetric) and x_res,y_res (asymmetric)
+- `--output` flag sets custom output GeoTIFF path
+- `--extent` flag clips output to specified sub-region
+- `--dtype` flag controls output raster dtype (e.g. uint8)
+- `--nodata` flag sets output nodata value
+- `--workspace` flag respected (output + registry land in specified dir)
+- Returns 1 for missing vector path
+- Returns 1 for invalid `--resolution` value (non-numeric, wrong count)
+- Returns 1 for invalid `--extent` value (non-numeric, wrong count)
+- CRS preserved from input vector to output raster
+- Dimensions match resolution and extent (10×10 extent at res=2.0 → 5×5 grid)
+- Output is always single-band
+- Registry: 2 artifacts (vector input + raster output), run persisted
+- Lineage: output raster has 1 ancestor (the vector input)
+- Run persisted with operator_name=rasterize_vector, status=completed
+- Full round-trip: run rasterize → artifacts list → artifacts show → lineage
+- `runs show` displays params as key-value lines after rasterize run
+- `checks show` lists validation checks after rasterize run
+
+**Signals:**
+- Single-input operator (vector only) wires to CLI cleanly — simpler than zonal/sample
+- Resolution parsing is new CLI concern (single vs comma-separated)
+- Extent parsing is new CLI concern (4-value comma-separated)
+- RasterizeVectorOperator gracefully handles missing attributes (skips features, no error)
+
+**Debt observed:**
+- Generic operator dispatch still deferred — fourth hand-wired flow
+- Empty vector handling lives at connector boundary, not operator — acceptable
+
+**Summary:** Twenty-six pressure tests. Fourth CLI flow (rasterize vector). Zero contract changes. 564 total tests passing.

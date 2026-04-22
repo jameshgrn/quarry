@@ -80,7 +80,9 @@ quarry/                          # Monorepo root
 │   │   ├── test_rasterize_vector.py # RasterizeVector polygon→raster (25)
 │   │   ├── test_cli.py          # CLI adapter: list/show/lineage/run hydrology (19)
 │   │   ├── test_cli_zonal.py    # CLI adapter: run zonal end-to-end (12)
-│   │   └── test_cli_inspection.py # CLI adapter: runs list/show, checks show (20)
+│   │   ├── test_cli_inspection.py # CLI adapter: runs list/show, checks show (20)
+│   │   ├── test_cli_sample.py   # CLI adapter: run sample end-to-end (19)
+│   │   └── test_cli_rasterize.py # CLI adapter: run rasterize end-to-end (26)
 │   └── fixtures/                # Test data (gitignored binaries)
 │
 ├── examples/
