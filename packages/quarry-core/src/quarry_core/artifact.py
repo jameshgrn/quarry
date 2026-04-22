@@ -24,10 +24,6 @@ class ArtifactType(Enum):
     RASTER = "raster"
     VECTOR = "vector"
     TABLE = "table"
-    TEMPORAL_STACK = "temporal_stack"
-    TILE_SET = "tile_set"
-    MODEL = "model"
-    POINT_CLOUD = "point_cloud"
 
 
 class BackingStoreKind(Enum):
