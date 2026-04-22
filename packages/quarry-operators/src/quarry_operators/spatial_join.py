@@ -38,7 +38,7 @@ from quarry_core.operator import (
 class SpatialJoinParams(OperatorParams):
     """Parameters for spatial join."""
 
-    output_path: str = ""
+    output_path: str | None = None
     predicate: str = "intersects"
 
 
@@ -95,7 +95,7 @@ class SpatialJoinOperator:
             errors.append("Params must be SpatialJoinParams")
             return errors
 
-        if not params.output_path:
+        if params.output_path is None:
             errors.append("output_path is required")
 
         if params.predicate != "intersects":
@@ -258,7 +258,6 @@ class SpatialJoinOperator:
                 "format": "geojson",
                 "left_feature_count": left_feature_count,
                 "output_feature_count": output_feature_count,
-                "had_schema_collision": had_collision,
                 "collision_renames": collision_renames,
             },
         )

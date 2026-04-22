@@ -799,12 +799,12 @@ def test_unmaterialized_input_rejected(op, workspace):
 
 
 # ---------------------------------------------------------------------------
-# 22. Neither burn_value nor burn_attribute → validation error
+# 22. burn_value always has default (1.0), burn_attribute is optional
 # ---------------------------------------------------------------------------
 
 
-def test_no_burn_source_rejected(op, workspace):
-    """Setting both burn_value=None and burn_attribute=None is rejected."""
+def test_burn_value_default_used(op, workspace):
+    """Default burn_value (1.0) is used when burn_attribute is not set."""
     poly = Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])
     vec_path = workspace / "input.geojson"
     _write_vector(vec_path, [poly])
@@ -813,11 +813,11 @@ def test_no_burn_source_rejected(op, workspace):
     params = RasterizeVectorParams(
         output_path=str(workspace / "out.tif"),
         resolution=(1.0, 1.0),
-        burn_value=None,
+        # burn_value not specified, should use default 1.0
         burn_attribute=None,
     )
     errors = op.validate_inputs([vec_art], params)
-    assert any("burn" in e.lower() for e in errors)
+    assert not any("burn" in e.lower() for e in errors)
 
 
 # ---------------------------------------------------------------------------

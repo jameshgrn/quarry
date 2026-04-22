@@ -72,7 +72,7 @@ NODATA = -1
 class D8FlowDirectionParams(OperatorParams):
     """Parameters for D8 flow direction computation."""
 
-    output_path: str = ""
+    output_path: str | None = None
     nodata: float | None = None
 
 
@@ -121,7 +121,7 @@ class D8FlowDirectionOperator:
             errors.append("Params must be D8FlowDirectionParams")
             return errors
 
-        if not params.output_path:
+        if params.output_path is None:
             errors.append("output_path is required")
 
         return errors

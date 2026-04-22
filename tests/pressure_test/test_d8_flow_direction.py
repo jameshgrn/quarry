@@ -208,7 +208,7 @@ class TestValidation:
     def test_rejects_missing_output_path(self, op, slope_east):
         path, _ = slope_east
         art = _make_artifact(path)
-        errors = op.validate_inputs([art], D8FlowDirectionParams(output_path=""))
+        errors = op.validate_inputs([art], D8FlowDirectionParams(output_path=None))
         assert any("output_path" in e for e in errors)
 
     def test_accepts_valid_input(self, op, slope_east):

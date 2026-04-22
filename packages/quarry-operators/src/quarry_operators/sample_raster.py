@@ -37,7 +37,7 @@ from quarry_core.operator import (
 class SampleRasterParams(OperatorParams):
     """Parameters for raster point sampling."""
 
-    output_path: str = ""
+    output_path: str | None = None
     bands: list[int] = field(default_factory=list)  # empty = all bands
     nodata_value: float | None = None  # override; None = use raster native
 
@@ -95,7 +95,7 @@ class SampleRasterOperator:
             errors.append("Params must be SampleRasterParams")
             return errors
 
-        if not params.output_path:
+        if params.output_path is None:
             errors.append("output_path is required")
 
         for b in params.bands:
