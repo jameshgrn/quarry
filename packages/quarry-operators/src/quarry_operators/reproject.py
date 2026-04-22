@@ -40,7 +40,7 @@ from quarry_core.operator import (
 class ReprojectParams(OperatorParams):
     """Parameters for reprojection."""
 
-    target_crs: str = ""  # e.g. "EPSG:4326", "EPSG:32610"
+    target_crs: str | None = None  # e.g. "EPSG:4326", "EPSG:32610"
     output_path: str = ""
     resampling: str = "nearest"  # nearest, bilinear, cubic, etc. (raster only)
     resolution: tuple[float, float] | None = None  # optional output resolution override
@@ -57,7 +57,9 @@ class ReprojectOperator:
     def spec(self) -> OperatorSpec:
         return OperatorSpec(
             input_types=(ArtifactType.RASTER, ArtifactType.VECTOR),
-            output_type=ArtifactType.RASTER,  # output type matches input type
+            # LIMITATION: OperatorSpec only supports single output_type; this operator
+            # produces RASTER or VECTOR matching input type (deferred until tile-splitting)
+            output_type=ArtifactType.RASTER,
             min_inputs=1,
             max_inputs=1,
             resource_scale=ResourceScale.MEDIUM,
@@ -92,14 +94,14 @@ class ReprojectOperator:
             errors.append("Params must be ReprojectParams")
             return errors
 
-        if not params.target_crs:
+        if params.target_crs is None:
             errors.append("target_crs is required")
 
         if not params.output_path:
             errors.append("output_path is required")
 
         # No-op check: same CRS
-        if artifact.spatial.crs and params.target_crs:
+        if artifact.spatial.crs and params.target_crs is not None:
             if artifact.spatial.crs == params.target_crs:
                 errors.append(f"Input CRS ({artifact.spatial.crs}) is already {params.target_crs}")
 

@@ -381,7 +381,7 @@ class TestValidation:
         conn = LocalFileConnector()
         mat = conn.materialize(str(sample_raster_4326), workspace)
 
-        params = ReprojectParams(target_crs="", output_path="/out.tif")
+        params = ReprojectParams(target_crs=None, output_path="/out.tif")
         op = ReprojectOperator()
         errors = op.validate_inputs([mat.artifact], params)
         assert any("target_crs" in e for e in errors)
