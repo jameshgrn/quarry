@@ -13,20 +13,35 @@ and lineage edges are persisted to the Registry.
 Usage:
     flow = HydrologyFlow(executor=LocalExecutor(), registry=registry)
     result = flow.run(dem_artifact, workspace=Path("/tmp/hydro"))
+
+    # Discriminated union: result is either success or failure
+    if result.success:
+        # Type narrowing: result is HydrologyFlowSuccess
+        print(result.filled_dem.id)
+        print(result.flow_direction.id)
+        print(result.flow_accumulation.id)
+    else:
+        # Type narrowing: result is HydrologyFlowFailure
+        print(f"Failed at {result.failed_step}: {result.error}")
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from quarry_core.artifact import Artifact, CheckResult, ValidationState
 from quarry_core.executor import RunRecord, RunStatus
-from quarry_core.operator import Operator, OperatorParams
+from quarry_core.operator import Operator, OperatorParams, OperatorResult
 
 from quarry_operators.d8_flow_direction import D8FlowDirectionOperator, D8FlowDirectionParams
 from quarry_operators.fill_depressions import FillDepressionsOperator, FillDepressionsParams
 from quarry_operators.flow_accumulation import FlowAccumulationOperator, FlowAccumulationParams
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 @dataclass(frozen=True)
@@ -43,35 +58,92 @@ class HydrologyFlowParams:
 
 
 @dataclass
-class HydrologyFlowResult:
-    """Result of the full hydrology flow."""
+class HydrologyFlowSuccess:
+    """Result of a successful hydrology flow — all 3 artifacts present.
 
-    # Artifacts at each stage
-    filled_dem: Artifact | None = None
-    flow_direction: Artifact | None = None
-    flow_accumulation: Artifact | None = None
+    Invariants:
+        - filled_dem, flow_direction, flow_accumulation are all non-None
+        - failed_step is None
+        - error is None
+        - success property returns True
+    """
 
-    # RunRecords at each stage
+    # All three artifacts completed
+    filled_dem: Artifact
+    flow_direction: Artifact
+    flow_accumulation: Artifact
+
+    # RunRecords from each stage
     runs: list[RunRecord] = field(default_factory=list)
 
     # Aggregated checks across all stages
     all_checks: list[CheckResult] = field(default_factory=list)
 
-    # Which step failed (None = success)
-    failed_step: str | None = None
-    error: str | None = None
+    # Success invariants
+    failed_step: None = field(default=None, init=False)
+    error: None = field(default=None, init=False)
 
     @property
     def success(self) -> bool:
-        return self.failed_step is None
+        """Always True for success results."""
+        return True
 
     @property
     def has_invalid_checks(self) -> bool:
+        """True if any check is INVALID."""
         return any(c.state == ValidationState.INVALID for c in self.all_checks)
 
     @property
     def artifacts(self) -> list[Artifact]:
+        """All three artifacts as a list."""
+        return [self.filled_dem, self.flow_direction, self.flow_accumulation]
+
+
+@dataclass
+class HydrologyFlowFailure:
+    """Result of a failed hydrology flow — partial artifacts may exist.
+
+    Invariants:
+        - failed_step is a non-empty string indicating which step failed
+        - error is a non-empty string describing the failure
+        - 0-2 artifacts may be present (depending on when failure occurred)
+        - success property returns False
+    """
+
+    # Which step failed (required for failures)
+    failed_step: str
+    # Error message (required for failures)
+    error: str
+
+    # Partial artifacts — 0 to 2 of these may be set depending on failure timing
+    filled_dem: Artifact | None = None
+    flow_direction: Artifact | None = None
+    flow_accumulation: Artifact | None = None
+
+    # RunRecords from completed stages (may be partial)
+    runs: list[RunRecord] = field(default_factory=list)
+
+    # Aggregated checks from completed stages
+    all_checks: list[CheckResult] = field(default_factory=list)
+
+    @property
+    def success(self) -> bool:
+        """Always False for failure results."""
+        return False
+
+    @property
+    def has_invalid_checks(self) -> bool:
+        """True if any check is INVALID."""
+        return any(c.state == ValidationState.INVALID for c in self.all_checks)
+
+    @property
+    def artifacts(self) -> list[Artifact]:
+        """Artifacts that were completed before failure."""
         return [a for a in [self.filled_dem, self.flow_direction, self.flow_accumulation] if a]
+
+
+# Discriminated union type
+HydrologyFlowResult = HydrologyFlowSuccess | HydrologyFlowFailure
 
 
 class HydrologyFlow:
@@ -107,11 +179,17 @@ class HydrologyFlow:
             params: Flow parameters.
 
         Returns:
-            HydrologyFlowResult with artifacts, runs, and checks from each stage.
+            HydrologyFlowSuccess if all steps complete, HydrologyFlowFailure otherwise.
         """
-        result = HydrologyFlowResult()
         workspace = Path(params.workspace)
         workspace.mkdir(parents=True, exist_ok=True)
+
+        # Accumulators for incremental state
+        runs: list[RunRecord] = []
+        all_checks: list[CheckResult] = []
+        filled_dem: Artifact | None = None
+        flow_direction: Artifact | None = None
+        flow_accumulation: Artifact | None = None
 
         # If registry provided, persist the input artifact first
         if self._registry is not None:
@@ -128,12 +206,27 @@ class HydrologyFlow:
             operator=FillDepressionsOperator(),
             inputs=[dem_artifact],
             params=fill_params,
-            result=result,
+            runs=runs,
+            all_checks=all_checks,
             step_name="fill_depressions",
         )
-        if not result.success:
-            return result
-        result.filled_dem = run_record.output.artifact
+        if run_record is None:
+            # Exception during execution
+            return HydrologyFlowFailure(
+                failed_step="fill_depressions",
+                error=runs[-1].error if runs else "Unknown error",
+                runs=runs,
+                all_checks=all_checks,
+            )
+        if run_record.status != RunStatus.COMPLETED:
+            # Step failed
+            return HydrologyFlowFailure(
+                failed_step="fill_depressions",
+                error=run_record.error or "fill_depressions did not complete",
+                runs=runs,
+                all_checks=all_checks,
+            )
+        filled_dem = run_record.output.artifact
 
         # --- Step 2: D8 flow direction ---
         d8_params = D8FlowDirectionParams(
@@ -142,14 +235,29 @@ class HydrologyFlow:
         )
         run_record = self._execute_step(
             operator=D8FlowDirectionOperator(),
-            inputs=[result.filled_dem],
+            inputs=[filled_dem],
             params=d8_params,
-            result=result,
+            runs=runs,
+            all_checks=all_checks,
             step_name="d8_flow_direction",
         )
-        if not result.success:
-            return result
-        result.flow_direction = run_record.output.artifact
+        if run_record is None:
+            return HydrologyFlowFailure(
+                failed_step="d8_flow_direction",
+                error=runs[-1].error if runs else "Unknown error",
+                filled_dem=filled_dem,
+                runs=runs,
+                all_checks=all_checks,
+            )
+        if run_record.status != RunStatus.COMPLETED:
+            return HydrologyFlowFailure(
+                failed_step="d8_flow_direction",
+                error=run_record.error or "d8_flow_direction did not complete",
+                filled_dem=filled_dem,
+                runs=runs,
+                all_checks=all_checks,
+            )
+        flow_direction = run_record.output.artifact
 
         # --- Step 3: Flow accumulation ---
         acc_params = FlowAccumulationParams(
@@ -158,42 +266,93 @@ class HydrologyFlow:
         )
         run_record = self._execute_step(
             operator=FlowAccumulationOperator(),
-            inputs=[result.flow_direction],
+            inputs=[flow_direction],
             params=acc_params,
-            result=result,
+            runs=runs,
+            all_checks=all_checks,
             step_name="flow_accumulation",
         )
-        if not result.success:
-            return result
-        result.flow_accumulation = run_record.output.artifact
+        if run_record is None:
+            return HydrologyFlowFailure(
+                failed_step="flow_accumulation",
+                error=runs[-1].error if runs else "Unknown error",
+                filled_dem=filled_dem,
+                flow_direction=flow_direction,
+                runs=runs,
+                all_checks=all_checks,
+            )
+        if run_record.status != RunStatus.COMPLETED:
+            return HydrologyFlowFailure(
+                failed_step="flow_accumulation",
+                error=run_record.error or "flow_accumulation did not complete",
+                filled_dem=filled_dem,
+                flow_direction=flow_direction,
+                runs=runs,
+                all_checks=all_checks,
+            )
+        flow_accumulation = run_record.output.artifact
 
-        return result
+        # Success — all three artifacts present
+        return HydrologyFlowSuccess(
+            filled_dem=filled_dem,
+            flow_direction=flow_direction,
+            flow_accumulation=flow_accumulation,
+            runs=runs,
+            all_checks=all_checks,
+        )
 
     def _execute_step(
         self,
         operator: Operator,
-        inputs: list[Artifact],
+        inputs: Sequence[Artifact],
         params: OperatorParams,
-        result: HydrologyFlowResult,
+        runs: list[RunRecord],
+        all_checks: list[CheckResult],
         step_name: str,
     ) -> RunRecord | None:
-        """Execute one step, persist to registry, update result."""
+        """Execute one step, persist to registry, update accumulators.
+
+        Args:
+            operator: The operator to execute
+            inputs: Input artifacts
+            params: Operator parameters
+            runs: Mutable list to append RunRecord to
+            all_checks: Mutable list to extend with checks
+            step_name: Name of the step for error reporting
+
+        Returns:
+            RunRecord if execution completed (regardless of success/failure),
+            None if an exception was raised during submission.
+        """
         try:
-            run_record = self._executor.submit(operator, inputs, params)
+            run_record = self._executor.submit(operator, list(inputs), params)
         except Exception as e:
-            result.failed_step = step_name
-            result.error = str(e)
+            # Create a synthetic failed run record to capture the error
+            failed_record = RunRecord(
+                id=f"failed-{step_name}-{datetime.now(timezone.utc).isoformat()}",
+                operator_name=step_name,
+                status=RunStatus.FAILED,
+                error=str(e),
+                submitted_at=datetime.now(timezone.utc),
+                started_at=datetime.now(timezone.utc),
+                completed_at=datetime.now(timezone.utc),
+                input_ids=[a.id for a in inputs],
+                params=params,
+                output=OperatorResult(artifact=inputs[0]) if inputs else None,  # placeholder
+                checks=[],
+                executor_name="local",
+            )
+            runs.append(failed_record)
             return None
 
-        result.runs.append(run_record)
+        runs.append(run_record)
 
         if run_record.status != RunStatus.COMPLETED:
-            result.failed_step = step_name
-            result.error = run_record.error or f"{step_name} did not complete"
+            # Step failed — return the record for error handling
             return run_record
 
         # Collect checks
-        result.all_checks.extend(run_record.checks)
+        all_checks.extend(run_record.checks)
 
         # Persist to registry (cascades artifact + checks + lineage)
         if self._registry is not None:
