@@ -34,7 +34,7 @@ from typing import TYPE_CHECKING
 
 from quarry_core.artifact import Artifact, CheckResult, ValidationState
 from quarry_core.executor import RunRecord, RunStatus
-from quarry_core.operator import Operator, OperatorParams, OperatorResult
+from quarry_core.operator import Operator, OperatorParams
 
 from quarry_operators.d8_flow_direction import D8FlowDirectionOperator, D8FlowDirectionParams
 from quarry_operators.fill_depressions import FillDepressionsOperator, FillDepressionsParams
@@ -338,7 +338,7 @@ class HydrologyFlow:
                 completed_at=datetime.now(timezone.utc),
                 input_ids=[a.id for a in inputs],
                 params=params,
-                output=OperatorResult(artifact=inputs[0]) if inputs else None,  # placeholder
+                output=None,
                 checks=[],
                 executor_name="local",
             )

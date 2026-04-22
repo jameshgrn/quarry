@@ -41,7 +41,7 @@ class ReprojectParams(OperatorParams):
     """Parameters for reprojection."""
 
     target_crs: str | None = None  # e.g. "EPSG:4326", "EPSG:32610"
-    output_path: str = ""
+    output_path: str | None = None
     resampling: str = "nearest"  # nearest, bilinear, cubic, etc. (raster only)
     resolution: tuple[float, float] | None = None  # optional output resolution override
 
