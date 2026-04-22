@@ -218,6 +218,83 @@ class TestRunRoundTrip:
         completed = registry.list_runs(status=RunStatus.COMPLETED)
         assert len(completed) == 3
 
+    def test_run_output_reconstructed(self, sample_raster, workspace, registry):
+        """get_run() must return a RunRecord with output.artifact matching the original."""
+        conn = LocalFileConnector()
+        mat = conn.materialize(str(sample_raster), workspace)
+        registry.save_artifact(mat.artifact)
+
+        output_path = workspace / "output_rt.tif"
+        params = ClipRasterParams(
+            bounds=(-5.0, -5.0, 5.0, 5.0),
+            output_path=str(output_path),
+        )
+        record = LocalExecutor().submit(ClipRasterOperator(), [mat.artifact], params)
+        registry.save_run(record)
+
+        recovered = registry.get_run(record.id)
+        assert recovered.output is not None
+        assert recovered.output.artifact.id == record.output.artifact.id
+        assert recovered.output.artifact.type == record.output.artifact.type
+        assert recovered.output.artifact.name == record.output.artifact.name
+
+    def test_failed_run_has_no_output(self, sample_raster, workspace, registry):
+        """A run that never produced output should have output=None after round-trip."""
+        from quarry_core.executor import RunRecord
+
+        run = RunRecord(
+            id="failed-run-001",
+            operator_name="clip_raster",
+            status=RunStatus.FAILED,
+            error="boom",
+        )
+        registry.save_run(run)
+
+        recovered = registry.get_run("failed-run-001")
+        assert recovered is not None
+        assert recovered.output is None
+        assert recovered.error == "boom"
+
+    def test_run_output_checks_match(self, sample_raster, workspace, registry):
+        """Checks on reconstructed output should match checks on the run."""
+        conn = LocalFileConnector()
+        mat = conn.materialize(str(sample_raster), workspace)
+        registry.save_artifact(mat.artifact)
+
+        output_path = workspace / "checks_rt.tif"
+        params = ClipRasterParams(
+            bounds=(-5.0, -5.0, 5.0, 5.0),
+            output_path=str(output_path),
+        )
+        record = LocalExecutor().submit(ClipRasterOperator(), [mat.artifact], params)
+        registry.save_run(record)
+
+        recovered = registry.get_run(record.id)
+        assert recovered.output is not None
+        assert len(recovered.output.checks) == len(recovered.checks)
+        for oc, rc in zip(recovered.output.checks, recovered.checks):
+            assert oc.check_name == rc.check_name
+            assert oc.state == rc.state
+
+    def test_list_runs_reconstructs_output(self, sample_raster, workspace, registry):
+        """list_runs() should also reconstruct output on each RunRecord."""
+        conn = LocalFileConnector()
+        mat = conn.materialize(str(sample_raster), workspace)
+        registry.save_artifact(mat.artifact)
+
+        output_path = workspace / "list_rt.tif"
+        params = ClipRasterParams(
+            bounds=(-5.0, -5.0, 5.0, 5.0),
+            output_path=str(output_path),
+        )
+        record = LocalExecutor().submit(ClipRasterOperator(), [mat.artifact], params)
+        registry.save_run(record)
+
+        runs = registry.list_runs()
+        assert len(runs) == 1
+        assert runs[0].output is not None
+        assert runs[0].output.artifact.id == record.output.artifact.id
+
     def test_nonexistent_run_returns_none(self, registry):
         assert registry.get_run("nonexistent-id") is None
 

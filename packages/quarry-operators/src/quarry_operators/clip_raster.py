@@ -34,11 +34,12 @@ from quarry_core.operator import (
 class ClipRasterParams(OperatorParams):
     """Parameters for raster clipping."""
 
-    # Clip by bounds (xmin, ymin, xmax, ymax) — used if no mask input
+    # Clip by bounds (xmin, ymin, xmax, ymax) — used if no mask input.
+    # XOR constraint: either bounds OR a vector mask input must be provided (not both required).
     bounds: tuple[float, float, float, float] | None = None
 
     # Output path (required)
-    output_path: str = ""
+    output_path: str | None = None
 
     # Whether to crop the raster to the clip extent (vs just masking)
     crop: bool = True
@@ -93,7 +94,7 @@ class ClipRasterOperator:
         if params.bounds is None and len(inputs) < 2:
             errors.append("Either bounds or a vector mask input is required")
 
-        if not params.output_path:
+        if params.output_path is None:
             errors.append("output_path is required")
 
         return errors

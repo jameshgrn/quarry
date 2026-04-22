@@ -49,10 +49,10 @@ _VALID_DTYPES = frozenset(
 class RasterizeVectorParams(OperatorParams):
     """Parameters for vector rasterization."""
 
-    output_path: str = ""
-    resolution: tuple[float, float] = (0.0, 0.0)  # (x_res, y_res) in CRS units
+    output_path: str | None = None
+    resolution: tuple[float, float] | None = None  # (x_res, y_res) in CRS units
     extent: tuple[float, float, float, float] | None = None  # xmin, ymin, xmax, ymax
-    burn_value: float | None = 1.0  # constant burn; ignored if burn_attribute set
+    burn_value: float = 1.0  # constant burn; ignored if burn_attribute set
     burn_attribute: str | None = None  # feature property name for per-feature burn
     nodata: float = 0.0  # background / nodata value
     dtype: str = "float32"
@@ -104,18 +104,18 @@ class RasterizeVectorOperator:
             errors.append("Params must be RasterizeVectorParams")
             return errors
 
-        if not params.output_path:
+        if params.output_path is None:
             errors.append("output_path is required")
 
-        rx, ry = params.resolution
-        if rx <= 0 or ry <= 0:
-            errors.append(f"resolution must be positive (x_res, y_res), got ({rx}, {ry})")
+        if params.resolution is None:
+            errors.append("resolution is required")
+        else:
+            rx, ry = params.resolution
+            if rx <= 0 or ry <= 0:
+                errors.append(f"resolution must be positive (x_res, y_res), got ({rx}, {ry})")
 
         if params.dtype not in _VALID_DTYPES:
             errors.append(f"Unsupported dtype '{params.dtype}'; valid: {sorted(_VALID_DTYPES)}")
-
-        if params.burn_value is None and params.burn_attribute is None:
-            errors.append("Either burn_value or burn_attribute must be set")
 
         if params.extent is not None:
             xmin, ymin, xmax, ymax = params.extent

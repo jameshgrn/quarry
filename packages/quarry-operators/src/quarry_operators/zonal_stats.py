@@ -38,7 +38,7 @@ STAT_COLUMNS = ("count", "sum", "mean", "min", "max", "std")
 class ZonalStatsParams(OperatorParams):
     """Parameters for zonal statistics."""
 
-    output_path: str = ""
+    output_path: str | None = None
     band: int = 1
     zone_id_field: str | None = None
 
@@ -96,7 +96,7 @@ class ZonalStatsOperator:
             errors.append("Params must be ZonalStatsParams")
             return errors
 
-        if not params.output_path:
+        if params.output_path is None:
             errors.append("output_path is required")
 
         if params.band < 1:

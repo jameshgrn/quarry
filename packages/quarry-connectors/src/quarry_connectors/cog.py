@@ -46,7 +46,6 @@ from quarry_core.connector import (
 class COGMetadata:
     """COG-specific structural metadata."""
 
-    is_cog: bool
     block_size: tuple[int, int] | None
     overview_levels: list[int]
     compression: str | None
@@ -54,6 +53,11 @@ class COGMetadata:
     dtype: str
     band_count: int
     size_bytes: int
+
+    @property
+    def is_cog(self) -> bool:
+        """Return True if the file is a valid COG (tiled with overviews)."""
+        return self.block_size is not None and len(self.overview_levels) > 0
 
 
 class COGConnector:
@@ -268,13 +272,10 @@ class COGConnector:
             )
 
             # COG validation: check tiling and overviews
-            is_tiled = ds.profile.get("tiled", False)
             block_shapes = ds.block_shapes
             block_size = block_shapes[0] if block_shapes else None
 
             overviews = ds.overviews(1)  # overviews for band 1
-
-            is_cog = is_tiled and len(overviews) > 0
 
             compression = ds.profile.get("compress", ds.compression)
 
@@ -282,7 +283,6 @@ class COGConnector:
                 size_bytes = Path(source_ref).stat().st_size
 
             cog_meta = COGMetadata(
-                is_cog=is_cog,
                 block_size=block_size,
                 overview_levels=overviews,
                 compression=compression.value if hasattr(compression, "value") else compression,

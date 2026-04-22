@@ -21,8 +21,9 @@ Design decisions:
 from __future__ import annotations
 
 import csv
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import psycopg
 import shapely.wkb
@@ -41,6 +42,39 @@ from quarry_core.connector import (
     MaterializeError,
     MaterializeResult,
 )
+
+
+@dataclass
+class IntrospectionResult:
+    """Base introspection result with common fields."""
+
+    columns: list[dict[str, Any]]
+    geometry_type: str | None
+    srid: int | None
+    extent: tuple[float, float, float, float] | None
+    row_count: int
+    kind: Literal["table", "query"]
+
+
+@dataclass
+class TableIntrospection(IntrospectionResult):
+    """Introspection result for a database table.
+
+    Has full geometry metadata and accurate row count from the database.
+    """
+
+    kind: Literal["table"] = "table"
+
+
+@dataclass
+class QueryIntrospection(IntrospectionResult):
+    """Introspection result for a raw SQL query.
+
+    Geometry metadata is not available without executing the query.
+    Row count is always 0 (unknown without full execution).
+    """
+
+    kind: Literal["query"] = "query"
 
 
 class PostGISConnector:
@@ -108,14 +142,14 @@ class PostGISConnector:
         except Exception as e:
             raise MaterializeError(source_ref, str(e)) from e
 
-        has_geometry = introspection["geometry_type"] is not None
+        has_geometry = introspection.geometry_type is not None
         artifact_type = ArtifactType.VECTOR if has_geometry else ArtifactType.TABLE
 
         # Build spatial descriptor
         spatial = SpatialDescriptor(
-            crs=f"EPSG:{introspection['srid']}" if introspection["srid"] else None,
-            extent=introspection.get("extent"),
-            feature_count=introspection["row_count"],
+            crs=f"EPSG:{introspection.srid}" if introspection.srid else None,
+            extent=introspection.extent,
+            feature_count=introspection.row_count,
         )
 
         # Build lineage params
@@ -256,11 +290,11 @@ class PostGISConnector:
             raise MaterializeError(source_ref, str(e)) from e
 
         return {
-            "columns": introspection["columns"],
-            "geometry_type": introspection["geometry_type"],
-            "srid": introspection["srid"],
-            "row_count": introspection["row_count"],
-            "extent": introspection.get("extent"),
+            "columns": introspection.columns,
+            "geometry_type": introspection.geometry_type,
+            "srid": introspection.srid,
+            "row_count": introspection.row_count,
+            "extent": introspection.extent,
         }
 
     # -----------------------------------------------------------------------
@@ -316,13 +350,13 @@ class PostGISConnector:
         schema: str | None,
         table: str | None,
         query: str | None,
-    ) -> dict[str, Any]:
+    ) -> TableIntrospection | QueryIntrospection:
         """Introspect a table or query to get column info, geometry details, extent, count."""
         if query:
             return self._introspect_query(cur, query)
         return self._introspect_table(cur, schema, table)
 
-    def _introspect_table(self, cur: Any, schema: str, table: str) -> dict[str, Any]:
+    def _introspect_table(self, cur: Any, schema: str, table: str) -> TableIntrospection:
         """Introspect a schema.table."""
         # Get columns
         cur.execute(
@@ -378,15 +412,15 @@ class PostGISConnector:
         count_row = cur.fetchall()
         row_count = count_row[0][0] if count_row else 0
 
-        return {
-            "columns": columns,
-            "geometry_type": geometry_type,
-            "srid": srid,
-            "extent": extent,
-            "row_count": row_count,
-        }
+        return TableIntrospection(
+            columns=columns,
+            geometry_type=geometry_type,
+            srid=srid,
+            extent=extent,
+            row_count=row_count,
+        )
 
-    def _introspect_query(self, cur: Any, query: str) -> dict[str, Any]:
+    def _introspect_query(self, cur: Any, query: str) -> QueryIntrospection:
         """Introspect a query by wrapping in a LIMIT 0 to get column info."""
         # Use the query with LIMIT 0 to get column info without fetching data
         cur.execute(f"SELECT * FROM ({query}) sub LIMIT 0")  # noqa: S608
@@ -398,13 +432,13 @@ class PostGISConnector:
 
         # For queries, we can't easily get geometry info without running it
         # Return minimal introspection
-        return {
-            "columns": columns,
-            "geometry_type": None,
-            "srid": None,
-            "extent": None,
-            "row_count": 0,
-        }
+        return QueryIntrospection(
+            columns=columns,
+            geometry_type=None,
+            srid=None,
+            extent=None,
+            row_count=0,
+        )
 
     # -----------------------------------------------------------------------
     # Private: eager dump (vector → GeoPackage)
@@ -416,7 +450,7 @@ class PostGISConnector:
         schema: str | None,
         table: str | None,
         query: str | None,
-        introspection: dict[str, Any],
+        introspection: TableIntrospection | QueryIntrospection,
         workspace: Path,
     ) -> Path:
         """Dump a geometry table/query to GeoPackage."""
@@ -433,7 +467,7 @@ class PostGISConnector:
         rows = cur.fetchall()
 
         # Find geometry column index
-        columns = introspection["columns"]
+        columns = introspection.columns
         geom_idx = None
         for i, col in enumerate(columns):
             if col.get("udt_name") == "geometry" or col["name"] == "geom":
@@ -453,8 +487,8 @@ class PostGISConnector:
                 continue
             properties[col["name"]] = _pg_type_to_fiona(col.get("data_type", "str"))
 
-        geom_type = _normalize_geometry_type(introspection["geometry_type"] or "Unknown")
-        srid = introspection["srid"] or 4326
+        geom_type = _normalize_geometry_type(introspection.geometry_type or "Unknown")
+        srid = introspection.srid or 4326
 
         output_name = table or "query_result"
         output_path = workspace / f"{output_name}.gpkg"
@@ -500,7 +534,7 @@ class PostGISConnector:
         schema: str | None,
         table: str | None,
         query: str | None,
-        introspection: dict[str, Any],
+        introspection: TableIntrospection | QueryIntrospection,
         workspace: Path,
     ) -> Path:
         """Dump a non-geometry table/query to CSV."""
@@ -512,7 +546,7 @@ class PostGISConnector:
         cur.execute(fetch_sql)
         rows = cur.fetchall()
 
-        columns = introspection["columns"]
+        columns = introspection.columns
         col_names = [c["name"] for c in columns]
 
         output_name = table or "query_result"
@@ -531,18 +565,20 @@ class PostGISConnector:
     # Private: metadata helpers
     # -----------------------------------------------------------------------
 
-    def _artifact_metadata(self, introspection: dict[str, Any]) -> dict[str, Any]:
+    def _artifact_metadata(
+        self, introspection: TableIntrospection | QueryIntrospection
+    ) -> dict[str, Any]:
         """Build artifact metadata bag from introspection results."""
         meta: dict[str, Any] = {
             "source": "postgis",
             "host": self._host,
             "dbname": self._dbname,
         }
-        if introspection["geometry_type"]:
-            meta["geometry_type"] = introspection["geometry_type"]
-        if introspection["srid"]:
-            meta["srid"] = introspection["srid"]
-        meta["column_count"] = len(introspection["columns"])
+        if introspection.geometry_type:
+            meta["geometry_type"] = introspection.geometry_type
+        if introspection.srid:
+            meta["srid"] = introspection.srid
+        meta["column_count"] = len(introspection.columns)
         return meta
 
 

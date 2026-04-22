@@ -27,6 +27,7 @@ from quarry_core.artifact import (
     ValidationState,
 )
 from quarry_core.executor import RunRecord, RunStatus
+from quarry_core.operator import OperatorResult
 
 
 class Registry:
@@ -597,12 +598,21 @@ class Registry:
             for cr in check_rows
         ]
 
+        # Reconstruct output OperatorResult from stored artifact ID
+        output = None
+        output_artifact_id = data.get("output_artifact_id")
+        if output_artifact_id:
+            artifact = self.get_artifact(output_artifact_id)
+            if artifact:
+                output = OperatorResult(artifact=artifact, checks=checks)
+
         return RunRecord(
             id=data["id"],
             operator_name=data["operator_name"],
             status=RunStatus(data["status"]),
             input_ids=json.loads(data["input_ids_json"]) if data.get("input_ids_json") else [],
             params=json.loads(data["params_json"]) if data.get("params_json") else {},
+            output=output,
             executor_name=data.get("executor_name") or "",
             executor_meta=json.loads(data["executor_meta_json"])
             if data.get("executor_meta_json")

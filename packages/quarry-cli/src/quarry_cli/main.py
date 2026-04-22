@@ -130,6 +130,130 @@ def cmd_lineage(args) -> int:
 
 
 # ---------------------------------------------------------------------------
+# runs list
+# ---------------------------------------------------------------------------
+
+
+def cmd_runs_list(args) -> int:
+    from quarry_core.executor import RunStatus
+    from quarry_registry.registry import Registry
+
+    registry = Registry(_resolve_workspace(args))
+    status_filter = RunStatus(args.status) if args.status else None
+    runs = registry.list_runs(status=status_filter, limit=args.limit)
+
+    if not runs:
+        print("No runs found.")
+        return 0
+
+    print(f"{'ID':<38} {'OPERATOR':<25} {'STATUS':<12} {'SUBMITTED':<18} {'DURATION'}")
+    print("-" * 110)
+    for r in runs:
+        submitted = r.submitted_at.strftime("%Y-%m-%d %H:%M") if r.submitted_at else "?"
+        dur = f"{r.duration_seconds:.1f}s" if r.duration_seconds is not None else "-"
+        print(f"{r.id:<38} {r.operator_name:<25} {r.status.value:<12} {submitted:<18} {dur}")
+
+    print(f"\n{len(runs)} run(s)")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# runs show
+# ---------------------------------------------------------------------------
+
+
+def cmd_runs_show(args) -> int:
+    from quarry_registry.registry import Registry
+
+    registry = Registry(_resolve_workspace(args))
+    run = registry.get_run(args.run_id)
+
+    if run is None:
+        print(f"Run not found: {args.run_id}", file=sys.stderr)
+        return 1
+
+    print(f"ID:        {run.id}")
+    print(f"Operator:  {run.operator_name}")
+    print(f"Status:    {run.status.value}")
+    print(f"Executor:  {run.executor_name or '-'}")
+    print(f"Submitted: {run.submitted_at}")
+    if run.started_at:
+        print(f"Started:   {run.started_at}")
+    if run.completed_at:
+        print(f"Completed: {run.completed_at}")
+    if run.duration_seconds is not None:
+        print(f"Duration:  {run.duration_seconds:.2f}s")
+
+    if run.input_ids:
+        print(f"\nInputs ({len(run.input_ids)}):")
+        for iid in run.input_ids:
+            print(f"  {iid}")
+
+    if run.params:
+        print("\nParams:")
+        for k, v in run.params.items():
+            print(f"  {k}: {v}")
+
+    if run.output:
+        art = run.output.artifact
+        print("\nOutput:")
+        print(f"  {art.id}  {art.type.value}  {art.name}")
+
+    if run.checks:
+        print(f"\nChecks ({len(run.checks)}):")
+        for c in run.checks:
+            print(f"  [{c.state.value:>7}] {c.check_name}: {c.message}")
+
+    if run.error:
+        print(f"\nError: {run.error}")
+
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# checks show
+# ---------------------------------------------------------------------------
+
+
+def cmd_checks_show(args) -> int:
+    from quarry_registry.registry import Registry
+
+    registry = Registry(_resolve_workspace(args))
+    target_id = args.id
+
+    # Try as artifact first, then as run
+    artifact = registry.get_artifact(target_id)
+    run = registry.get_run(target_id)
+
+    if artifact is None and run is None:
+        print(f"No artifact or run found for: {target_id}", file=sys.stderr)
+        return 1
+
+    checks = registry.get_checks(
+        artifact_id=target_id if artifact else None,
+        run_id=target_id if run else None,
+    )
+
+    label = f"artifact {artifact.name}" if artifact else f"run {run.operator_name}"
+    print(f"Checks for {label} ({target_id}):")
+
+    if not checks:
+        print("  (no checks)")
+        return 0
+
+    print()
+    for c in checks:
+        ts = c.timestamp.strftime("%Y-%m-%d %H:%M") if c.timestamp else "?"
+        print(f"  [{c.state.value:>7}] {c.check_name}")
+        print(f"           {c.message}")
+        print(f"           {ts}")
+        print()
+
+    print(f"{len(checks)} check(s)")
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # run hydrology
 # ---------------------------------------------------------------------------
 
@@ -269,6 +393,211 @@ def cmd_run_zonal(args) -> int:
 
 
 # ---------------------------------------------------------------------------
+# run sample
+# ---------------------------------------------------------------------------
+
+
+def cmd_run_sample(args) -> int:
+    from quarry_connectors.local_file import LocalFileConnector
+    from quarry_core.executors.local import LocalExecutor
+    from quarry_operators.sample_raster import SampleRasterOperator, SampleRasterParams
+    from quarry_registry.registry import Registry
+
+    raster_path = Path(args.raster).resolve()
+    if not raster_path.exists():
+        print(f"Raster file not found: {raster_path}", file=sys.stderr)
+        return 1
+
+    points_path = Path(args.points).resolve()
+    if not points_path.exists():
+        print(f"Points file not found: {points_path}", file=sys.stderr)
+        return 1
+
+    workspace = _resolve_workspace(args)
+
+    # Materialize both inputs through connector
+    connector = LocalFileConnector()
+    print(f"Materializing raster: {raster_path}")
+    raster_artifact = connector.materialize(str(raster_path), workspace).artifact
+
+    print(f"Materializing points: {points_path}")
+    points_artifact = connector.materialize(str(points_path), workspace).artifact
+
+    # Set up executor + registry
+    executor = LocalExecutor()
+    registry = Registry(workspace)
+    registry.save_artifact(raster_artifact)
+    registry.save_artifact(points_artifact)
+
+    # Parse bands
+    bands: list[int] = []
+    if args.bands:
+        try:
+            bands = [int(b.strip()) for b in args.bands.split(",")]
+        except ValueError:
+            print(
+                f"Invalid --bands value: {args.bands!r} (expected comma-separated integers)",
+                file=sys.stderr,
+            )
+            return 1
+
+    # Output path
+    output_dir = workspace / "sample"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = Path(args.output).resolve() if args.output else output_dir / "sample_raster.csv"
+
+    params = SampleRasterParams(
+        output_path=str(output_path),
+        bands=bands,
+        nodata_value=args.nodata,
+    )
+
+    print(f"Running sample raster → {output_path}")
+    try:
+        run_record = executor.submit(
+            SampleRasterOperator(),
+            [raster_artifact, points_artifact],
+            params,
+        )
+    except Exception as e:
+        print(f"FAILED: {e}", file=sys.stderr)
+        return 1
+
+    # Persist
+    registry.save_run(run_record)
+
+    # Report
+    output = run_record.output.artifact
+    uri = output.backing.uri if output.backing else "?"
+    print(f"\nCompleted (1 step, {len(run_record.checks)} checks)")
+    print(f"  {output.name:<25} → {uri}")
+
+    invalid = [c for c in run_record.checks if c.state.value == "invalid"]
+    if invalid:
+        print(f"\nWARNING: {len(invalid)} invalid check(s):")
+        for c in invalid:
+            print(f"  [{c.check_name}] {c.message}")
+
+    print(f"\nRegistry: {registry.db_path}")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# run rasterize
+# ---------------------------------------------------------------------------
+
+
+def cmd_run_rasterize(args) -> int:
+    from quarry_connectors.local_file import LocalFileConnector
+    from quarry_core.executors.local import LocalExecutor
+    from quarry_operators.rasterize_vector import (
+        RasterizeVectorOperator,
+        RasterizeVectorParams,
+    )
+    from quarry_registry.registry import Registry
+
+    vector_path = Path(args.vector).resolve()
+    if not vector_path.exists():
+        print(f"Vector file not found: {vector_path}", file=sys.stderr)
+        return 1
+
+    workspace = _resolve_workspace(args)
+
+    # Materialize input through connector
+    connector = LocalFileConnector()
+    print(f"Materializing vector: {vector_path}")
+    vector_artifact = connector.materialize(str(vector_path), workspace).artifact
+
+    # Set up executor + registry
+    executor = LocalExecutor()
+    registry = Registry(workspace)
+    registry.save_artifact(vector_artifact)
+
+    # Output path
+    output_dir = workspace / "rasterize"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = Path(args.output).resolve() if args.output else output_dir / "rasterized.tif"
+
+    # Parse resolution
+    try:
+        parts = [float(x.strip()) for x in args.resolution.split(",")]
+    except ValueError:
+        print(
+            f"Invalid --resolution value: {args.resolution!r} (expected x_res,y_res)",
+            file=sys.stderr,
+        )
+        return 1
+    if len(parts) == 1:
+        resolution = (parts[0], parts[0])
+    elif len(parts) == 2:
+        resolution = (parts[0], parts[1])
+    else:
+        print(
+            f"Invalid --resolution value: {args.resolution!r} (expected x_res or x_res,y_res)",
+            file=sys.stderr,
+        )
+        return 1
+
+    # Parse extent
+    extent = None
+    if args.extent:
+        try:
+            extent_parts = [float(x.strip()) for x in args.extent.split(",")]
+        except ValueError:
+            print(
+                f"Invalid --extent value: {args.extent!r} (expected xmin,ymin,xmax,ymax)",
+                file=sys.stderr,
+            )
+            return 1
+        if len(extent_parts) != 4:
+            print(
+                f"Invalid --extent value: {args.extent!r} (expected xmin,ymin,xmax,ymax)",
+                file=sys.stderr,
+            )
+            return 1
+        extent = (extent_parts[0], extent_parts[1], extent_parts[2], extent_parts[3])
+
+    params = RasterizeVectorParams(
+        output_path=str(output_path),
+        resolution=resolution,
+        extent=extent,
+        burn_value=args.burn_value,
+        burn_attribute=args.burn_attribute,
+        nodata=args.nodata,
+        dtype=args.dtype,
+    )
+
+    print(f"Running rasterize → {output_path}")
+    try:
+        run_record = executor.submit(
+            RasterizeVectorOperator(),
+            [vector_artifact],
+            params,
+        )
+    except Exception as e:
+        print(f"FAILED: {e}", file=sys.stderr)
+        return 1
+
+    # Persist
+    registry.save_run(run_record)
+
+    # Report
+    output = run_record.output.artifact
+    uri = output.backing.uri if output.backing else "?"
+    print(f"\nCompleted (1 step, {len(run_record.checks)} checks)")
+    print(f"  {output.name:<25} → {uri}")
+
+    invalid = [c for c in run_record.checks if c.state.value == "invalid"]
+    if invalid:
+        print(f"\nWARNING: {len(invalid)} invalid check(s):")
+        for c in invalid:
+            print(f"  [{c.check_name}] {c.message}")
+
+    print(f"\nRegistry: {registry.db_path}")
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # Parser
 # ---------------------------------------------------------------------------
 
@@ -289,7 +618,7 @@ def build_parser() -> argparse.ArgumentParser:
     art_list.add_argument("--workspace", default=".", help="Workspace directory (default: .)")
     art_list.add_argument(
         "--type",
-        choices=["raster", "vector", "table", "temporal_stack", "tile_set", "model", "point_cloud"],
+        choices=["raster", "vector", "table"],
         help="Filter by artifact type",
     )
     art_list.add_argument("--limit", type=int, default=100, help="Max results (default: 100)")
@@ -306,6 +635,37 @@ def build_parser() -> argparse.ArgumentParser:
     lin_parser.add_argument("artifact_id", help="Artifact ID")
     lin_parser.add_argument("--workspace", default=".", help="Workspace directory (default: .)")
     lin_parser.set_defaults(func=cmd_lineage)
+
+    # --- runs ---
+    runs_parser = subparsers.add_parser("runs", help="Inspect run records")
+    runs_sub = runs_parser.add_subparsers(dest="runs_command")
+
+    # runs list
+    runs_list = runs_sub.add_parser("list", help="List runs")
+    runs_list.add_argument("--workspace", default=".", help="Workspace directory (default: .)")
+    runs_list.add_argument(
+        "--status",
+        choices=["pending", "running", "completed", "failed", "cancelled"],
+        help="Filter by status",
+    )
+    runs_list.add_argument("--limit", type=int, default=100, help="Max results (default: 100)")
+    runs_list.set_defaults(func=cmd_runs_list)
+
+    # runs show
+    runs_show = runs_sub.add_parser("show", help="Show run details")
+    runs_show.add_argument("run_id", help="Run ID")
+    runs_show.add_argument("--workspace", default=".", help="Workspace directory (default: .)")
+    runs_show.set_defaults(func=cmd_runs_show)
+
+    # --- checks ---
+    checks_parser = subparsers.add_parser("checks", help="Inspect validation checks")
+    checks_sub = checks_parser.add_subparsers(dest="checks_command")
+
+    # checks show
+    checks_show = checks_sub.add_parser("show", help="Show checks for an artifact or run")
+    checks_show.add_argument("id", help="Artifact ID or Run ID")
+    checks_show.add_argument("--workspace", default=".", help="Workspace directory (default: .)")
+    checks_show.set_defaults(func=cmd_checks_show)
 
     # --- run ---
     run_parser = subparsers.add_parser("run", help="Execute a flow")
@@ -332,6 +692,51 @@ def build_parser() -> argparse.ArgumentParser:
     zonal.add_argument("--band", type=int, default=1, help="Raster band to analyze (default: 1)")
     zonal.add_argument("--zone-id-field", default=None, help="Feature property to use as zone ID")
     zonal.set_defaults(func=cmd_run_zonal)
+
+    # run sample
+    sample = run_sub.add_parser("sample", help="Sample raster values at point locations → CSV")
+    sample.add_argument("--raster", required=True, help="Path to input raster")
+    sample.add_argument(
+        "--points", required=True, help="Path to point vector (GeoPackage, shapefile)"
+    )
+    sample.add_argument("--workspace", default=".", help="Workspace directory (default: .)")
+    sample.add_argument("--bands", default=None, help="Comma-separated band indices (default: all)")
+    sample.add_argument(
+        "--output",
+        default=None,
+        help="Output CSV path (default: workspace/sample/sample_raster.csv)",
+    )
+    sample.add_argument("--nodata", type=float, default=None, help="Nodata value override")
+    sample.set_defaults(func=cmd_run_sample)
+
+    # run rasterize
+    rasterize = run_sub.add_parser(
+        "rasterize", help="Rasterize vector polygons → GeoTIFF (constant or attribute burn)"
+    )
+    rasterize.add_argument("--vector", required=True, help="Path to input polygon vector")
+    rasterize.add_argument("--workspace", default=".", help="Workspace directory (default: .)")
+    rasterize.add_argument(
+        "--resolution",
+        required=True,
+        help="Pixel resolution: x_res or x_res,y_res (CRS units)",
+    )
+    rasterize.add_argument(
+        "--burn-value", type=float, default=1.0, help="Constant burn value (default: 1.0)"
+    )
+    rasterize.add_argument(
+        "--burn-attribute", default=None, help="Feature property for per-feature burn value"
+    )
+    rasterize.add_argument("--nodata", type=float, default=0.0, help="Nodata value (default: 0.0)")
+    rasterize.add_argument("--dtype", default="float32", help="Output dtype (default: float32)")
+    rasterize.add_argument(
+        "--output",
+        default=None,
+        help="Output GeoTIFF path (default: workspace/rasterize/rasterized.tif)",
+    )
+    rasterize.add_argument(
+        "--extent", default=None, help="Output extent: xmin,ymin,xmax,ymax (default: vector bounds)"
+    )
+    rasterize.set_defaults(func=cmd_run_rasterize)
 
     return parser
 

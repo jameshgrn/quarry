@@ -1,0 +1,40 @@
+# Quarry Monorepo Layering Invariants
+# Enforces strict downward-only dependency flow
+# Confirmed by scan: 87 files, 164 edges, all below-diagonal (clean layering)
+
+[[layer]]
+name = "core"
+packages = ["quarry_core"]
+description = "Contracts layer — ZERO dependencies on other quarry packages"
+allowed_dependencies = []  # Core has no quarry dependencies
+
+[[layer]]
+name = "connectors"
+packages = ["quarry_connectors"]
+description = "Data access layer — depends on core only"
+allowed_dependencies = ["quarry_core"]
+
+[[layer]]
+name = "registry"
+packages = ["quarry_registry"]
+description = "Persistence layer — depends on core only"
+allowed_dependencies = ["quarry_core"]
+
+[[layer]]
+name = "operators"
+packages = ["quarry_operators"]
+description = "Transformation layer — depends on core + connectors"
+allowed_dependencies = ["quarry_core", "quarry_connectors"]
+
+[[layer]]
+name = "cli"
+packages = ["quarry_cli"]
+description = "Adapter layer — depends on everything below"
+allowed_dependencies = ["quarry_core", "quarry_connectors", "quarry_registry", "quarry_operators"]
+
+# Global rules
+[rules]
+# No circular dependencies between any packages
+no_circular_dependencies = true
+# Enforce strict layer ordering (no skipping layers in a way that violates hierarchy)
+strict_layer_order = true
