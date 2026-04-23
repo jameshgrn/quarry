@@ -1,5 +1,7 @@
 """PostGIS connector pressure test.
 
+Lane: connector
+
 Adversarial stress points:
 1. source_ref parsing: schema.table, bare table, SELECT query — where does str feel underfit?
 2. Geometry vs non-geometry branching → VECTOR vs TABLE artifact type

@@ -1,5 +1,7 @@
 """SourceRef — typed envelope for source references.
 
+Lane: connector
+
 A SourceRef wraps the raw string that connectors consume, adding:
 - kind: classification tag for routing
 - params: optional parsed fields for connector-specific structure

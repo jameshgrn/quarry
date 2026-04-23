@@ -1,5 +1,7 @@
 """Reproject operator pressure test.
 
+Lane: operator
+
 Stress points:
 1. Spatial descriptor updates (CRS changes, extent transforms, resolution recalc)
 2. Output metadata regeneration (fresh from actual output, not copied from input)

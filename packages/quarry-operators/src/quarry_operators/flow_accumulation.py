@@ -1,5 +1,7 @@
 """FlowAccumulationOperator — computes upstream contributing area from D8 flow directions.
 
+Lane: operator
+
 Third hydrology operator. Completes the minimal hydrology spine:
 fill_depressions → d8_flow_direction → flow_accumulation
 

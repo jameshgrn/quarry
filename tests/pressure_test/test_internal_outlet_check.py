@@ -1,5 +1,7 @@
 """Pressure test: InternalOutletCount check.
 
+Lane: check
+
 Exercises:
   - Standalone check on D8 flow direction artifacts
   - Operator-internal check via D8FlowDirectionOperator

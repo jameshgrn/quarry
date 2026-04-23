@@ -1,5 +1,7 @@
 """Aspect operator pressure test.
 
+Lane: operator
+
 Stress points:
 1. Flat DEM produces flat_value (-1) everywhere
 2. East-facing slope (dz/dx > 0, dz/dy = 0) produces 90°

@@ -1,5 +1,7 @@
 """ClipRasterOperator — clips a raster artifact to bounds or mask.
 
+Lane: operator
+
 Accepts: one raster artifact (+ optional vector mask as second input)
 Produces: one raster artifact (clipped)
 Checks: crs_valid, extent_within_input, backing_accessible

@@ -1,5 +1,7 @@
 """COG connector pressure test.
 
+Lane: connector
+
 Adversarial stress points:
 1. source_ref is a plain URI/path — trivial parsing, but 4th connector shape
 2. Remote vs local branching: /vsicurl/ for HTTP, direct for local

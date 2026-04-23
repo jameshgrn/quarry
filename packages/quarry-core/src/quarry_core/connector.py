@@ -1,5 +1,7 @@
 """Connector — the canonical gateway from outside world to artifact.
 
+Lane: connector
+
 No geospatial object enters the system except through a connector.
 This is the deepest rule.
 

@@ -1,5 +1,7 @@
 """D8 flow direction operator pressure test.
 
+Lane: operator
+
 Stress points:
 1. Steepest descent correctly picks direction (cardinal vs diagonal)
 2. Diagonal distance weighting (sqrt(2)) affects direction choice

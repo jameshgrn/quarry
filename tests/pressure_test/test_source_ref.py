@@ -1,5 +1,7 @@
 """SourceRef pressure test.
 
+Lane: connector
+
 This is a CONTRACT EVOLUTION test — the first change to quarry-core contracts.
 
 Stress points:

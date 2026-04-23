@@ -1,5 +1,7 @@
 """Check — validation layer for artifacts and runs.
 
+Lane: check
+
 Every operator declares checks. Every artifact carries validation state.
 Every run emits pass/warn/fail signals.
 

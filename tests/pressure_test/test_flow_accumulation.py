@@ -1,5 +1,7 @@
 """FlowAccumulation operator pressure test.
 
+Lane: operator
+
 Stress points:
 1. Simple linear chain: accumulation increases downstream
 2. Branching: confluence cells sum upstream contributions

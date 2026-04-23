@@ -1,5 +1,7 @@
 """AspectOperator — compute surface aspect from DEM.
 
+Lane: operator
+
 Terrain analysis operator. Calculates compass direction that each cell
 faces (downslope direction). Standard GIS aspect measure.
 

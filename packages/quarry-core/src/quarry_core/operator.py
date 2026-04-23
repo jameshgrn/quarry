@@ -1,5 +1,7 @@
 """Operator — a typed transformation on canonical artifacts.
 
+Lane: operator
+
 Operators only consume and emit canonical artifacts.
 No operator operates on raw chaos unless it is explicitly a normalization operator.
 

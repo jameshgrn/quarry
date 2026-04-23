@@ -1,5 +1,7 @@
 """Registry — persistent memory for artifacts, runs, checks, and lineage.
 
+Lane: registry
+
 This is what turns transient contract objects into a real harness.
 DuckDB-backed, single-file, append-oriented.
 
@@ -148,10 +150,7 @@ class Registry:
         column_type: str,
     ) -> None:
         """Apply additive schema migration for older local registries."""
-        existing = {
-            row[1]
-            for row in conn.execute(f"PRAGMA table_info('{table}')").fetchall()
-        }
+        existing = {row[1] for row in conn.execute(f"PRAGMA table_info('{table}')").fetchall()}
         if column not in existing:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_type}")
 
@@ -480,12 +479,7 @@ class Registry:
             run_row = conn.execute("SELECT COUNT(*) FROM runs").fetchone()
             check_row = conn.execute("SELECT COUNT(*) FROM checks").fetchone()
             lineage_row = conn.execute("SELECT COUNT(*) FROM lineage").fetchone()
-            if (
-                artifact_row is None
-                or run_row is None
-                or check_row is None
-                or lineage_row is None
-            ):
+            if artifact_row is None or run_row is None or check_row is None or lineage_row is None:
                 raise RuntimeError("Registry stats query returned no rows")
 
             artifact_count = artifact_row[0]

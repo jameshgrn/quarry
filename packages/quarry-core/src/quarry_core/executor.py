@@ -1,5 +1,7 @@
 """Executor — where operations run.
 
+Lane: executor
+
 Execution is orthogonal to logic. A flow should not care whether it runs
 local, subprocess, SSH, SLURM, or cloud worker.
 

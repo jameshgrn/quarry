@@ -1,5 +1,7 @@
 """Pressure test: end-to-end flow through the substrate.
 
+Lane: flow
+
 Flow:
   local file → LocalFileConnector.materialize → Artifact
   → ClipRasterOperator.execute → clipped Artifact

@@ -1,5 +1,7 @@
 """LocalFileConnector — materializes local geospatial files into artifacts.
 
+Lane: connector
+
 The simplest connector. Takes a local path, inspects it, wraps it as an artifact.
 Does NOT copy the file — wraps it in place (strategy: "wrapped_local").
 

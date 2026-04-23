@@ -1,5 +1,7 @@
 """ReprojectOperator — reprojects a raster or vector artifact to a new CRS.
 
+Lane: operator
+
 Pressures:
 - Spatial descriptor updates (CRS changes, extent transforms, resolution recalc)
 - Output metadata regeneration (not just copying input metadata)

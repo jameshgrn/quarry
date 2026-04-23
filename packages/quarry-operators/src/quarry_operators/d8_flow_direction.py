@@ -1,5 +1,7 @@
 """D8FlowDirectionOperator — computes steepest-descent flow direction.
 
+Lane: operator
+
 Second hydrology operator. Requires a depression-filled DEM as input
 (output of FillDepressionsOperator).
 

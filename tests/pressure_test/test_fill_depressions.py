@@ -1,5 +1,7 @@
 """FillDepressions operator pressure test.
 
+Lane: operator
+
 Stress points:
 1. Single-celled pits filled correctly
 2. Multi-celled depressions filled to spill elevation

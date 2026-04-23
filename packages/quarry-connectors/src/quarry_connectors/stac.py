@@ -1,5 +1,7 @@
 """STACConnector — materializes STAC items into canonical artifacts.
 
+Lane: connector
+
 Pressures:
 - source_ref (structured reference needed: item ID + asset key)
 - discoverability (catalog search with spatial/temporal filters)

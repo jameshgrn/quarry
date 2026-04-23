@@ -1,5 +1,7 @@
 """Pressure test: end-to-end hydrology flow with registry integration.
 
+Lane: flow
+
 Exercises:
   - Full chain: fill_depressions → d8_flow_direction → flow_accumulation
   - Every artifact/run/check/lineage persisted to DuckDB registry

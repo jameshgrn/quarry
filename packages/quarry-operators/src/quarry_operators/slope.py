@@ -1,5 +1,7 @@
 """SlopeOperator — compute surface slope from DEM.
 
+Lane: operator
+
 Terrain analysis operator. Calculates slope magnitude at each cell
 using elevation gradients. Standard GIS slope measure.
 

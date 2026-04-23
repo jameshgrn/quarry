@@ -1,5 +1,7 @@
 """STAC connector pressure test.
 
+Lane: connector
+
 Tests the connector against mocked STAC responses (unit)
 and optionally against a real API (integration, marked).
 

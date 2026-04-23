@@ -1,5 +1,7 @@
 """Adversarial DEM fixtures for the D8 hydrology pack.
 
+Lane: check
+
 Purpose: deepen trust in the fill → D8 → accumulation chain by
 exercising pathological geometries that stress edge-case handling.
 

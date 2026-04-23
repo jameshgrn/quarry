@@ -1,5 +1,7 @@
 """COGConnector — materializes Cloud-Optimized GeoTIFFs into canonical artifacts.
 
+Lane: connector
+
 Pressures:
 - source_ref is a plain URI (local path or remote URL) — simplest shape
 - Remote vs local branching (GDAL virtual filesystem for HTTP/S3)

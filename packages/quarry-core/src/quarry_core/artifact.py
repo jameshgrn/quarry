@@ -1,5 +1,7 @@
 """Artifact — the internal unit of truth.
 
+Lane: artifact
+
 An artifact is NOT a file. It is a typed, tracked, validated unit of geospatial data
 with identity independent of its storage location.
 

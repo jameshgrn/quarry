@@ -1,5 +1,7 @@
 """Registry pressure test: persist and recover artifacts, runs, checks, lineage.
 
+Lane: registry
+
 Tests whether contracts serialize cleanly through DuckDB and come back identical.
 
 Failure signals:
@@ -117,9 +119,7 @@ class TestArtifactRoundTrip:
         conn = LocalFileConnector()
         artifact = conn.materialize(str(sample_raster), workspace).artifact
 
-        updated = artifact.with_check(
-            CRSValid().run(artifact)
-        )
+        updated = artifact.with_check(CRSValid().run(artifact))
 
         assert updated.metadata == artifact.metadata
         assert updated.metadata is not artifact.metadata

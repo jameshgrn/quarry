@@ -1,5 +1,7 @@
 """FillDepressionsOperator — fills depressions in a DEM using Priority-Flood.
 
+Lane: operator
+
 First hydrology domain operator. Canonical preprocessing step before
 D8 flow direction computation.
 

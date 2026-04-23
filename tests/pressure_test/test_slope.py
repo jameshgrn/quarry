@@ -1,5 +1,7 @@
 """Slope operator pressure test.
 
+Lane: operator
+
 Stress points:
 1. Perfectly flat DEM produces zero slope everywhere
 2. 45-degree inclined plane produces correct slope (45° / 100% / π/4 rad)

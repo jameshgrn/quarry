@@ -1,5 +1,7 @@
 """PostGISConnector — materializes PostGIS tables/queries into canonical artifacts.
 
+Lane: connector
+
 Pressures:
 - source_ref (schema.table, bare table, SELECT query — str is strained here)
 - connection lifecycle (no file handle, must connect/introspect/disconnect)
