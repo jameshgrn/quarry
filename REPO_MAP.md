@@ -54,10 +54,8 @@ quarry/                          # Monorepo root
 │       └── src/quarry_cli/
 │           └── main.py          # argparse CLI: artifacts list/show, lineage, run hydrology/zonal
 │
-├── src/georuntime/              # Legacy prototype (DO NOT MODIFY — migration deferred)
-│
 ├── tests/
-│   ├── pressure_test/           # Substrate pressure tests (495 tests, 20 suites)
+│   ├── pressure_test/           # Substrate pressure tests (578 tests, 24 suites)
 │   │   ├── conftest.py          # PYTHONPATH setup for dev
 │   │   ├── test_end_to_end.py   # Kernel: connector → operator → executor (15)
 │   │   ├── test_registry.py     # Registry round-trips (18)

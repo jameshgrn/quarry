@@ -238,6 +238,40 @@ domain incision. Zero contract changes. 187 total tests passing.
 **Debt observed:**
 - Pure Python loops same as FillDepressions — numba deferred
 - Flat resolution iterates until convergence — worst case O(n) iterations on pathological flats.
+
+## 19. Registry Integrity Repair (2026-04-22)
+
+**Components:** Registry persistence, SourceRef routing, LocalExecutor failure semantics, HydrologyFlow
+**Tests:** targeted updates to registry, source_ref, connector_router, hydrology_flow, end_to_end
+**Contract changes:** YES — SourceRef local kinds split into LOCAL_RASTER / LOCAL_VECTOR / LOCAL_PATH; executor failure is now represented as a FAILED RunRecord
+
+**Proved:**
+- Artifact lineage now round-trips through the registry instead of disappearing on load
+- OperatorResult timing, warnings, and metadata now survive run persistence
+- `save_run()` is transactional rather than a sequence of independent commits
+- Local vector paths no longer route through raster-only connectors
+- Failed flow steps are recorded as real runs, not synthetic placeholder records
+
+**Signals:**
+- The prior router kind taxonomy was too coarse to support trustworthy adapter routing
+- The prior executor/flow boundary split failure semantics across layers and forced fake state
+- Registry losslessness must be tested explicitly at the field level, not inferred from basic round-trips
+
+## 20. Adapter + Repo Surface Cleanup (2026-04-22)
+
+**Components:** CLI adapter, example workflow, workspace/test bootstrap
+**Tests:** targeted CLI pressure tests + example execution path checks
+**Contract changes:** None
+
+**Proved:**
+- Single-step CLI commands now handle failed `RunRecord`s directly instead of assuming `submit()` raises
+- Example code no longer dereferences `record.output` without checking completion
+- The repo no longer exposes `georuntime` as a parallel packaged product
+- Pressure-test bootstrap includes every active quarry package
+
+**Signals:**
+- Changing executor semantics exposed stale adapter assumptions immediately
+- Keeping a legacy package live at the root was an ontology violation, not harmless clutter
   Could use BFS from draining cells instead. Deferred.
 - No cycle detection yet — assumed acyclic after fill. Add if needed.
 
@@ -778,3 +812,28 @@ operator pattern through CLI. Zero contract changes. 495 total tests passing.
 - Empty vector handling lives at connector boundary, not operator — acceptable
 
 **Summary:** Twenty-six pressure tests. Fourth CLI flow (rasterize vector). Zero contract changes. 564 total tests passing.
+
+## 25. Contract Cleanup + Hygiene (2026-04-22)
+
+**Components:** HydrologyFlow internal contract + repo structure
+**Tests:** 14 (existing hydrology tests re-run to verify contract change)
+**Contract changes:** Internal only — `_execute_step` signature cleaned
+
+**Proved:**
+- `HydrologyFlow._execute_step` now has pure return contract: returns `(RunRecord, list[CheckResult])`
+- Callers explicitly accumulate: `runs.append(run_record); all_checks.extend(step_checks)`
+- No hidden mutation pathways — state changes are visible at call site
+- All 27 hydrology flow tests pass after contract change
+- 4 additional tests from recent additions (not previously logged)
+- Empty `src/` directory removed — was confusing ontology (packages live under `packages/`)
+- Test count reconciled: 578 total (was under-reported as 564)
+
+**Signals:**
+- Mixed contract (mutate + return) detected and fixed before it spread
+- Repository hygiene matters for ontology clarity
+- Test count drift happens — periodic reconciliation needed
+
+**Debt observed:**
+- None new. Cleanup only.
+
+**Summary:** Fourteen pressure tests (verification). Contract cleanup in HydrologyFlow. Repo hygiene. 578 total tests passing.

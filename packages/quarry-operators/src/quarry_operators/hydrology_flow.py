@@ -28,7 +28,6 @@ Usage:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -202,22 +201,14 @@ class HydrologyFlow:
             apply_gradient=params.apply_gradient,
             epsilon=params.epsilon,
         )
-        run_record = self._execute_step(
+        run_record, step_checks = self._execute_step(
             operator=FillDepressionsOperator(),
             inputs=[dem_artifact],
             params=fill_params,
-            runs=runs,
-            all_checks=all_checks,
             step_name="fill_depressions",
         )
-        if run_record is None:
-            # Exception during execution
-            return HydrologyFlowFailure(
-                failed_step="fill_depressions",
-                error=runs[-1].error if runs else "Unknown error",
-                runs=runs,
-                all_checks=all_checks,
-            )
+        runs.append(run_record)
+        all_checks.extend(step_checks)
         if run_record.status != RunStatus.COMPLETED:
             # Step failed
             return HydrologyFlowFailure(
@@ -233,22 +224,14 @@ class HydrologyFlow:
             output_path=str(workspace / "flow_direction.tif"),
             nodata=params.nodata,
         )
-        run_record = self._execute_step(
+        run_record, step_checks = self._execute_step(
             operator=D8FlowDirectionOperator(),
             inputs=[filled_dem],
             params=d8_params,
-            runs=runs,
-            all_checks=all_checks,
             step_name="d8_flow_direction",
         )
-        if run_record is None:
-            return HydrologyFlowFailure(
-                failed_step="d8_flow_direction",
-                error=runs[-1].error if runs else "Unknown error",
-                filled_dem=filled_dem,
-                runs=runs,
-                all_checks=all_checks,
-            )
+        runs.append(run_record)
+        all_checks.extend(step_checks)
         if run_record.status != RunStatus.COMPLETED:
             return HydrologyFlowFailure(
                 failed_step="d8_flow_direction",
@@ -264,23 +247,14 @@ class HydrologyFlow:
             output_path=str(workspace / "flow_accumulation.tif"),
             weight=params.weight,
         )
-        run_record = self._execute_step(
+        run_record, step_checks = self._execute_step(
             operator=FlowAccumulationOperator(),
             inputs=[flow_direction],
             params=acc_params,
-            runs=runs,
-            all_checks=all_checks,
             step_name="flow_accumulation",
         )
-        if run_record is None:
-            return HydrologyFlowFailure(
-                failed_step="flow_accumulation",
-                error=runs[-1].error if runs else "Unknown error",
-                filled_dem=filled_dem,
-                flow_direction=flow_direction,
-                runs=runs,
-                all_checks=all_checks,
-            )
+        runs.append(run_record)
+        all_checks.extend(step_checks)
         if run_record.status != RunStatus.COMPLETED:
             return HydrologyFlowFailure(
                 failed_step="flow_accumulation",
@@ -306,56 +280,26 @@ class HydrologyFlow:
         operator: Operator,
         inputs: Sequence[Artifact],
         params: OperatorParams,
-        runs: list[RunRecord],
-        all_checks: list[CheckResult],
         step_name: str,
-    ) -> RunRecord | None:
-        """Execute one step, persist to registry, update accumulators.
+    ) -> tuple[RunRecord, list[CheckResult]]:
+        """Execute one step and persist to registry.
 
         Args:
             operator: The operator to execute
             inputs: Input artifacts
             params: Operator parameters
-            runs: Mutable list to append RunRecord to
-            all_checks: Mutable list to extend with checks
             step_name: Name of the step for error reporting
 
         Returns:
-            RunRecord if execution completed (regardless of success/failure),
-            None if an exception was raised during submission.
+            Tuple of (RunRecord, list of CheckResult from this step).
+            Caller is responsible for accumulating runs and checks.
+            Failure is represented as status=FAILED in the RunRecord.
         """
-        try:
-            run_record = self._executor.submit(operator, list(inputs), params)
-        except Exception as e:
-            # Create a synthetic failed run record to capture the error
-            failed_record = RunRecord(
-                id=f"failed-{step_name}-{datetime.now(timezone.utc).isoformat()}",
-                operator_name=step_name,
-                status=RunStatus.FAILED,
-                error=str(e),
-                submitted_at=datetime.now(timezone.utc),
-                started_at=datetime.now(timezone.utc),
-                completed_at=datetime.now(timezone.utc),
-                input_ids=[a.id for a in inputs],
-                params=params,
-                output=None,
-                checks=[],
-                executor_name="local",
-            )
-            runs.append(failed_record)
-            return None
+        run_record = self._executor.submit(operator, list(inputs), params)
+        step_checks = list(run_record.checks)
 
-        runs.append(run_record)
-
-        if run_record.status != RunStatus.COMPLETED:
-            # Step failed — return the record for error handling
-            return run_record
-
-        # Collect checks
-        all_checks.extend(run_record.checks)
-
-        # Persist to registry (cascades artifact + checks + lineage)
+        # Persist every attempted run. Failed runs are still real runs.
         if self._registry is not None:
             self._registry.save_run(run_record)
 
-        return run_record
+        return run_record, step_checks
