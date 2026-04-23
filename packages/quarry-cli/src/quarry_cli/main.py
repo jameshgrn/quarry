@@ -680,6 +680,206 @@ def cmd_run_rasterize(args) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Param coercion for generic dispatch
+# ---------------------------------------------------------------------------
+
+
+def _coerce_value(raw: str, target_type: type) -> object:
+    """Coerce a raw CLI string to the target dataclass field type."""
+    import types
+    import typing
+
+    origin = typing.get_origin(target_type)
+    args = typing.get_args(target_type)
+
+    # Union / Optional (X | None)
+    if origin is typing.Union or isinstance(target_type, types.UnionType):
+        non_none = [a for a in args if a is not type(None)]
+        if type(None) in args or len(non_none) < len(args):
+            if raw.lower() == "none":
+                return None
+            if len(non_none) == 1:
+                return _coerce_value(raw, non_none[0])
+
+    # Literal
+    if origin is typing.Literal:
+        if raw not in args:
+            raise ValueError(f"{raw!r} not in allowed values: {args}")
+        return raw
+
+    # list[X]
+    if origin is list:
+        if not raw:
+            return []
+        elem_type = args[0] if args else str
+        return [_coerce_value(item.strip(), elem_type) for item in raw.split(",")]
+
+    # tuple[X, ...]
+    if origin is tuple:
+        parts = [p.strip() for p in raw.split(",")]
+        if len(parts) != len(args):
+            raise ValueError(
+                f"Expected {len(args)} comma-separated values for tuple, got {len(parts)}"
+            )
+        return tuple(_coerce_value(p, t) for p, t in zip(parts, args))
+
+    # Scalars
+    if target_type is bool:
+        low = raw.lower()
+        if low in ("true", "1", "yes"):
+            return True
+        if low in ("false", "0", "no"):
+            return False
+        raise ValueError(f"Cannot convert {raw!r} to bool (expected true/false/1/0/yes/no)")
+
+    if target_type is int:
+        return int(raw)
+
+    if target_type is float:
+        return float(raw)
+
+    if target_type is str:
+        return raw
+
+    raise ValueError(f"Unsupported param type: {target_type}")
+
+
+def _build_params(params_cls: type, raw_params: dict[str, str], output_path: str) -> object:
+    """Build a typed params dataclass from raw CLI key=value strings."""
+    import dataclasses
+    import typing
+
+    hints = typing.get_type_hints(params_cls, include_extras=True)
+    valid_fields = {f.name for f in dataclasses.fields(params_cls)}
+
+    kwargs: dict[str, object] = {"output_path": output_path}
+
+    for key, raw_value in raw_params.items():
+        if key not in valid_fields:
+            raise ValueError(
+                f"Unknown parameter {key!r} for {params_cls.__name__}. "
+                f"Available: {', '.join(sorted(valid_fields - {'output_path'}))}"
+            )
+        kwargs[key] = _coerce_value(raw_value, hints[key])
+
+    return params_cls(**kwargs)
+
+
+# ---------------------------------------------------------------------------
+# run <operator-name> (generic dispatch)
+# ---------------------------------------------------------------------------
+
+
+def cmd_run_generic(args) -> int:
+    """Generic operator dispatch: materialize inputs, execute, persist, report."""
+    from quarry_core.executors.local import LocalExecutor
+    from quarry_operators.registry import get_operator, get_params_class
+    from quarry_registry.registry import Registry
+
+    operator_name: str = args.operator_name
+    input_paths: list[str] = args.input
+    output_path_raw: str | None = args.output
+    raw_params: dict[str, str] = {}
+    for item in args.params or []:
+        if "=" not in item:
+            print(f"Invalid param format: {item!r} (expected key=value)", file=sys.stderr)
+            return 1
+        k, v = item.split("=", 1)
+        raw_params[k] = v
+
+    workspace = _resolve_workspace(args)
+
+    # 1. Get operator and params class
+    try:
+        operator = get_operator(operator_name)
+    except KeyError as e:
+        print(str(e), file=sys.stderr)
+        return 1
+
+    params_cls = get_params_class(operator_name)
+    spec = operator.spec
+
+    # 2. Validate input count
+    if len(input_paths) < spec.min_inputs:
+        print(
+            f"Operator {operator_name!r} requires at least {spec.min_inputs} input(s), "
+            f"got {len(input_paths)}",
+            file=sys.stderr,
+        )
+        return 1
+    if spec.max_inputs >= 0 and len(input_paths) > spec.max_inputs:
+        print(
+            f"Operator {operator_name!r} accepts at most {spec.max_inputs} input(s), "
+            f"got {len(input_paths)}",
+            file=sys.stderr,
+        )
+        return 1
+
+    # 3. Resolve output path
+    output_dir = workspace / operator_name
+    output_dir.mkdir(parents=True, exist_ok=True)
+    if output_path_raw:
+        output_path = str(Path(output_path_raw).resolve())
+    else:
+        ext_map = {"raster": ".tif", "vector": ".gpkg", "table": ".csv"}
+        ext = ext_map.get(spec.output_type.value, ".out")
+        output_path = str(output_dir / f"{operator_name}{ext}")
+
+    # 4. Build typed params
+    try:
+        params = _build_params(params_cls, raw_params, output_path)
+    except (ValueError, TypeError) as e:
+        print(f"Parameter error: {e}", file=sys.stderr)
+        return 1
+
+    # 5. Materialize inputs through router
+    router = _get_router()
+    artifacts = []
+    for input_path_str in input_paths:
+        p = Path(input_path_str).resolve()
+        if not p.exists():
+            print(f"Input file not found: {p}", file=sys.stderr)
+            return 1
+        source_ref = SourceRef.local(str(p))
+        match = router.select_one(source_ref)
+        if not match:
+            print(f"No connector found for: {source_ref.raw}", file=sys.stderr)
+            return 1
+        print(f"Materializing: {p}")
+        result = match.connector.materialize(str(p), workspace)
+        artifacts.append(result.artifact)
+
+    # 6. Set up executor + registry
+    executor = LocalExecutor()
+    registry = Registry(workspace)
+    for art in artifacts:
+        registry.save_artifact(art)
+
+    # 7. Execute
+    print(f"Running {operator_name} → {output_path}")
+    run_record = executor.submit(operator, artifacts, params)
+
+    failure_rc = _handle_run_failure(run_record)
+    if failure_rc:
+        return failure_rc
+
+    # 8. Persist
+    registry.save_run(run_record)
+
+    invalid_rc = _handle_invalid_checks(run_record.checks, run_record.operator_name)
+    if invalid_rc:
+        return invalid_rc
+
+    # 9. Report
+    output_artifact = run_record.output.artifact
+    uri = output_artifact.backing.uri if output_artifact.backing else "?"
+    print(f"\nCompleted (1 step, {len(run_record.checks)} checks)")
+    print(f"  {output_artifact.name:<25} → {uri}")
+    print(f"\nRegistry: {registry.db_path}")
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # Parser
 # ---------------------------------------------------------------------------
 
@@ -819,6 +1019,39 @@ def build_parser() -> argparse.ArgumentParser:
         "--extent", default=None, help="Output extent: xmin,ymin,xmax,ymax (default: vector bounds)"
     )
     rasterize.set_defaults(func=cmd_run_rasterize)
+
+    # --- run <operator-name> (generic dispatch) ---
+    from quarry_operators.registry import OPERATOR_NAMES
+
+    for op_name in OPERATOR_NAMES:
+        if op_name in run_sub.choices:
+            continue
+        op_parser = run_sub.add_parser(op_name, help=f"Run the {op_name} operator")
+        op_parser.add_argument(
+            "--input",
+            action="append",
+            required=True,
+            dest="input",
+            help="Input file path (repeatable for multi-input operators)",
+        )
+        op_parser.add_argument(
+            "--output",
+            default=None,
+            help=f"Output file path (default: workspace/{op_name}/{op_name}.<ext>)",
+        )
+        op_parser.add_argument(
+            "-p",
+            action="append",
+            dest="params",
+            metavar="KEY=VALUE",
+            help="Operator parameter (repeatable). E.g. -p units=degrees",
+        )
+        op_parser.add_argument(
+            "--workspace",
+            default=".",
+            help="Workspace directory (default: .)",
+        )
+        op_parser.set_defaults(func=cmd_run_generic, operator_name=op_name)
 
     return parser
 
