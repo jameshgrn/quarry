@@ -135,13 +135,13 @@ def parabolic_surface(tmp_path):
     """Parabolic surface: z = x^2 + y^2. Known gradient at any point."""
     x = np.linspace(-5, 5, 101)
     y = np.linspace(-5, 5, 101)
-    X, Y = np.meshgrid(x, y)
-    dem = X**2 + Y**2
+    xx, yy = np.meshgrid(x, y)
+    dem = xx**2 + yy**2
     # At (3, 0): dz/dx = 6, dz/dy = 0, slope = atan(6) ≈ 80.54°
     # At (0, 0): slope = 0
     path = tmp_path / "parabola.tif"
     _write_dem(path, dem.astype(np.float64))
-    return path, dem, (x, y, X, Y)
+    return path, dem, (x, y, xx, yy)
 
 
 @pytest.fixture
@@ -243,12 +243,12 @@ class TestFlatSurface:
         output = tmp_path / "slope.tif"
         params = SlopeParams(output_path=str(output), units="degrees")
 
-        result = op.execute([art], params)
+        _ = op.execute([art], params)
 
         with rasterio.open(output) as src:
             slope = src.read(1)
-            valid = slope != params.output_nodata
-            assert np.all(slope[valid] == 0.0)
+            valid_mask = slope != params.output_nodata
+            assert np.all(slope[valid_mask] == 0.0)
 
     def test_flat_all_units_zero(self, op, flat_dem, tmp_path):
         """Flat surface: all unit conversions should give zero/valid."""
@@ -293,7 +293,6 @@ class TestInclinedPlane:
 
         with rasterio.open(output) as src:
             slope = src.read(1)
-            valid = slope != params.output_nodata
             # Interior cells (not edges) should be ~45°
             interior = slope[1:-1, 1:-1]
             # Central difference on inclined plane: exactly 45°
@@ -363,7 +362,7 @@ class TestParabolicSurface:
 
     def test_parabola_gradient_increases_away_from_center(self, op, parabolic_surface, tmp_path):
         """Slope should increase with distance from center."""
-        path, _, (x, y, X, Y) = parabolic_surface
+        path, _, (x, y, xx, yy) = parabolic_surface
         art = _make_artifact(path)
         output = tmp_path / "slope.tif"
         params = SlopeParams(output_path=str(output), units="degrees")
@@ -548,7 +547,7 @@ class TestEdgeCases:
         output = tmp_path / "slope.tif"
         params = SlopeParams(output_path=str(output), nodata=-9999.0)
 
-        result = op.execute([art], params)
+        _ = op.execute([art], params)
 
         with rasterio.open(output) as src:
             slope = src.read(1)

@@ -371,7 +371,9 @@ class AspectOperator:
                 CheckResult(
                     check_name="nodata_preserved",
                     state=ValidationState.WARNING,
-                    message=f"Nodata mismatch: input={input_nodata_count}, output={output_nodata_count}",
+                    message=(
+                        f"Nodata mismatch: input={input_nodata_count}, output={output_nodata_count}"
+                    ),
                 )
             )
 

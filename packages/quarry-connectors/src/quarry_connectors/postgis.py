@@ -23,7 +23,7 @@ from __future__ import annotations
 import csv
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import psycopg
 import shapely.wkb
@@ -42,6 +42,9 @@ from quarry_core.connector import (
     MaterializeError,
     MaterializeResult,
 )
+
+if TYPE_CHECKING:
+    from quarry_core.source_ref import SourceRef
 
 
 @dataclass
@@ -114,7 +117,7 @@ class PostGISConnector:
 
     def materialize(
         self,
-        source_ref: str,
+        source_ref: SourceRef | str,
         workspace: Path,
         *,
         lazy: bool = False,
@@ -276,7 +279,7 @@ class PostGISConnector:
 
         return entries
 
-    def metadata(self, source_ref: str) -> dict[str, Any]:
+    def metadata(self, source_ref: SourceRef | str) -> dict[str, Any]:
         """Get table/query metadata without materializing data."""
         schema, table, query = self._parse_source_ref(source_ref)
 
@@ -301,14 +304,26 @@ class PostGISConnector:
     # Public helper: source_ref parsing (exposed for testing)
     # -----------------------------------------------------------------------
 
-    def _parse_source_ref(self, source_ref: str) -> tuple[str | None, str | None, str | None]:
+    def _parse_source_ref(
+        self, source_ref: SourceRef | str
+    ) -> tuple[str | None, str | None, str | None]:
         """Parse source_ref into (schema, table, query).
 
         Returns:
             (schema, table, None) for table references
             (None, None, query) for SQL queries
         """
-        stripped = source_ref.strip()
+        from quarry_core.source_ref import SourceRef, SourceRefKind
+
+        if isinstance(source_ref, SourceRef):
+            if source_ref.kind == SourceRefKind.DATABASE_REF:
+                params = source_ref.params or {}
+                if "query" in params:
+                    return (None, None, params["query"])
+                return (params.get("schema"), params.get("table"), None)
+            stripped = source_ref.raw.strip()
+        else:
+            stripped = source_ref.strip()
 
         # Query detection: starts with SELECT (case-insensitive)
         if stripped.upper().startswith("SELECT "):

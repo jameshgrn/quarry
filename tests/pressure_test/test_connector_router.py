@@ -46,7 +46,7 @@ class StubConnector:
 
     def materialize(
         self,
-        source_ref: str,
+        source_ref: SourceRef | str,
         workspace: Path,
         *,
         lazy: bool = False,
@@ -70,12 +70,12 @@ def _make_router() -> tuple[
     router = ConnectorRouter()
     router.register(
         cog,
-        kinds={SourceRefKind.LOCAL_PATH, SourceRefKind.REMOTE_URI},
+        kinds={SourceRefKind.LOCAL_RASTER, SourceRefKind.REMOTE_URI},
         priority=0,
     )
     router.register(
         local,
-        kinds={SourceRefKind.LOCAL_PATH},
+        kinds={SourceRefKind.LOCAL_PATH, SourceRefKind.LOCAL_RASTER, SourceRefKind.LOCAL_VECTOR},
         priority=10,
         fallback=True,
     )
@@ -124,13 +124,12 @@ class TestLocalGeoTIFFAmbiguity:
         best = router.select_one(SourceRef.local("/data/dem.tif"))
         assert best.connector.name == "cog"
 
-    def test_local_geojson_matches_both(self):
-        """Non-raster local files also match both LOCAL_PATH connectors."""
+    def test_local_geojson_matches_only_local_file(self):
+        """Vector paths should not be eligible for raster-only connectors."""
         router, _, _, _, _ = _make_router()
         matches = router.select(SourceRef.local("/data/parcels.geojson"))
-        names = [m.connector.name for m in matches]
-        assert "cog" in names
-        assert "local_file" in names
+        assert len(matches) == 1
+        assert matches[0].connector.name == "local_file"
 
 
 # ---------------------------------------------------------------------------
@@ -254,7 +253,7 @@ class TestUnknownSource:
         router = ConnectorRouter()
         router.register(
             StubConnector("strict"),
-            kinds={SourceRefKind.LOCAL_PATH},
+            kinds={SourceRefKind.LOCAL_RASTER},
             priority=0,
         )
         ref = SourceRef(raw="mystery", kind=SourceRefKind.UNKNOWN)
@@ -272,7 +271,7 @@ class TestUnknownSource:
         ref = SourceRef.local("/data/missing.tif")
         with pytest.raises(NoConnectorError) as exc_info:
             router.select_one(ref)
-        assert "local_path" in str(exc_info.value)
+        assert "local_raster" in str(exc_info.value)
 
 
 # ---------------------------------------------------------------------------
@@ -331,8 +330,8 @@ class TestPriorityOrdering:
         router = ConnectorRouter()
         cog = StubConnector("cog")
         local = StubConnector("local_file")
-        router.register(cog, kinds={SourceRefKind.LOCAL_PATH}, priority=10)
-        router.register(local, kinds={SourceRefKind.LOCAL_PATH}, priority=0)
+        router.register(cog, kinds={SourceRefKind.LOCAL_RASTER}, priority=10)
+        router.register(local, kinds={SourceRefKind.LOCAL_RASTER}, priority=0)
         matches = router.select(SourceRef.local("/data/dem.tif"))
         assert matches[0].connector.name == "local_file"
         assert matches[1].connector.name == "cog"
@@ -341,8 +340,8 @@ class TestPriorityOrdering:
         router = ConnectorRouter()
         a = StubConnector("a")
         b = StubConnector("b")
-        router.register(a, kinds={SourceRefKind.LOCAL_PATH}, priority=5)
-        router.register(b, kinds={SourceRefKind.LOCAL_PATH}, priority=5)
+        router.register(a, kinds={SourceRefKind.LOCAL_RASTER}, priority=5)
+        router.register(b, kinds={SourceRefKind.LOCAL_RASTER}, priority=5)
         matches = router.select(SourceRef.local("/data/x.tif"))
         assert len(matches) == 2
 
@@ -404,9 +403,9 @@ class TestEdgeCases:
     def test_source_ref_passes_through(self):
         """SourceRef input is not re-inferred."""
         router, _, _, _, _ = _make_router()
-        ref = SourceRef(raw="not-a-path", kind=SourceRefKind.LOCAL_PATH)
+        ref = SourceRef(raw="not-a-path", kind=SourceRefKind.LOCAL_RASTER)
         matches = router.select(ref)
-        # Should match LOCAL_PATH connectors even though raw looks weird
+        # Should match declared local-raster connectors even though raw looks weird
         assert len(matches) == 2
         assert matches[0].connector.name == "cog"
 

@@ -22,7 +22,7 @@ from __future__ import annotations
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
 import rasterio
@@ -40,6 +40,9 @@ from quarry_core.connector import (
     MaterializeError,
     MaterializeResult,
 )
+
+if TYPE_CHECKING:
+    from quarry_core.source_ref import SourceRef
 
 
 @dataclass(frozen=True)
@@ -89,7 +92,7 @@ class COGConnector:
 
     def materialize(
         self,
-        source_ref: str,
+        source_ref: SourceRef | str,
         workspace: Path,
         *,
         lazy: bool = False,
@@ -209,7 +212,7 @@ class COGConnector:
             notes=f"Downloaded {download_path.name} ({download_path.stat().st_size} bytes)",
         )
 
-    def metadata(self, source_ref: str) -> dict[str, Any]:
+    def metadata(self, source_ref: SourceRef | str) -> dict[str, Any]:
         """Get COG metadata without materializing."""
         source_type = self._classify_source(source_ref)
 
@@ -238,9 +241,21 @@ class COGConnector:
     # Public helper: source classification
     # -----------------------------------------------------------------------
 
-    def _classify_source(self, source_ref: str) -> str:
+    def _classify_source(self, source_ref: SourceRef | str) -> str:
         """Classify source_ref as 'local' or 'remote'."""
-        parsed = urlparse(source_ref)
+        from quarry_core.source_ref import SourceRef, SourceRefKind
+
+        if isinstance(source_ref, SourceRef):
+            if source_ref.kind == SourceRefKind.REMOTE_URI:
+                return "remote"
+            if source_ref.kind in (
+                SourceRefKind.LOCAL_PATH,
+                SourceRefKind.LOCAL_RASTER,
+                SourceRefKind.LOCAL_VECTOR,
+            ):
+                return "local"
+
+        parsed = urlparse(str(source_ref))
         if parsed.scheme in ("http", "https", "s3", "gs", "az"):
             return "remote"
         return "local"
@@ -249,7 +264,9 @@ class COGConnector:
     # Private: inspection
     # -----------------------------------------------------------------------
 
-    def _inspect(self, source_ref: str, source_type: str) -> tuple[COGMetadata, SpatialDescriptor]:
+    def _inspect(
+        self, source_ref: SourceRef | str, source_type: str
+    ) -> tuple[COGMetadata, SpatialDescriptor]:
         """Open the raster and extract metadata without reading pixel data."""
         if source_type == "local":
             path = Path(source_ref).resolve()
@@ -298,7 +315,7 @@ class COGConnector:
     # Private: helpers
     # -----------------------------------------------------------------------
 
-    def _vsi_path(self, source_ref: str) -> str:
+    def _vsi_path(self, source_ref: SourceRef | str) -> str:
         """Convert a remote URL to GDAL virtual filesystem path."""
         parsed = urlparse(source_ref)
         if parsed.scheme in ("http", "https"):
@@ -311,14 +328,14 @@ class COGConnector:
             return f"/vsiaz/{parsed.netloc}{parsed.path}"
         return source_ref
 
-    def _derive_name(self, source_ref: str) -> str:
+    def _derive_name(self, source_ref: SourceRef | str) -> str:
         """Derive artifact name from source_ref."""
         parsed = urlparse(source_ref)
         if parsed.path:
             return Path(parsed.path).stem
         return Path(source_ref).stem
 
-    def _download(self, source_ref: str, workspace: Path) -> Path:
+    def _download(self, source_ref: SourceRef | str, workspace: Path) -> Path:
         """Download a remote COG to workspace."""
         import requests
 

@@ -11,7 +11,6 @@ Stress points:
 8. Single row/col handling
 """
 
-
 import numpy as np
 import pytest
 import rasterio
@@ -246,7 +245,7 @@ class TestFlatSurface:
         output = tmp_path / "aspect.tif"
         params = AspectParams(output_path=str(output), flat_value=-1.0)
 
-        result = op.execute([art], params)
+        _ = op.execute([art], params)
 
         with rasterio.open(output) as src:
             aspect = src.read(1)
@@ -260,12 +259,12 @@ class TestFlatSurface:
         output = tmp_path / "aspect.tif"
         params = AspectParams(output_path=str(output), flat_value=999.0)
 
-        result = op.execute([art], params)
+        _ = op.execute([art], params)
 
         with rasterio.open(output) as src:
             aspect = src.read(1)
-            valid = aspect != params.output_nodata
-            assert np.all(aspect[valid] == 999.0)
+            valid_mask = aspect != params.output_nodata
+            assert np.all(aspect[valid_mask] == 999.0)
 
 
 # ---------------------------------------------------------------------------
@@ -511,7 +510,7 @@ class TestEdgeCases:
         output = tmp_path / "aspect.tif"
         params = AspectParams(output_path=str(output), nodata=-9999.0)
 
-        result = op.execute([art], params)
+        _ = op.execute([art], params)
 
         with rasterio.open(output) as src:
             aspect = src.read(1)
