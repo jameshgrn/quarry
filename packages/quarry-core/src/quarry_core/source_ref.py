@@ -41,8 +41,19 @@ class SourceRefKind(Enum):
     UNKNOWN = "unknown"  # unclassified raw string
 
 
-RASTER_EXTENSIONS = {".tif", ".tiff", ".geotiff", ".jp2", ".hgt", ".nc", ".vrt"}
-VECTOR_EXTENSIONS = {".shp", ".geojson", ".gpkg", ".kml", ".gml", ".fgb", ".parquet"}
+RASTER_EXTENSIONS = {
+    ".tif",
+    ".tiff",
+    ".geotiff",
+    ".jp2",
+    ".hgt",
+    ".nc",
+    ".vrt",
+    ".h5",
+    ".hdf5",
+    ".hdf",
+}
+VECTOR_EXTENSIONS = {".shp", ".geojson", ".gpkg", ".kml", ".gml", ".fgb", ".parquet", ".geoparquet"}
 
 
 def _freeze_value(value: Any) -> Any:

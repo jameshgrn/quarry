@@ -90,6 +90,7 @@ just tree          # Show package dependency graph
 - CLI plain text output only — JSON mode deferred until needed
 - Operator string params (`compress`, `resampling`, `predicate`) validated against hardcoded tuples — `Literal` types deferred (large surface area)
 - `HydrologyFlow._execute_step` mutates input lists AND returns a value — mixed contract, single caller, low urgency
+- `artifact.metadata` duplicates `spatial` keys (`crs`, `extent`, `band_count`) across all connectors — strip banned keys, enforce 3-way split: `spatial` (typed contract), `metadata` (connector-specific extras), `lineage.params` (execution provenance). Phase: ban new consumers → strip keys → enforce via constructor validation
 
 ## Substrate Phase — COMPLETE
 
