@@ -31,7 +31,9 @@ import fiona
 import numpy as np
 import pytest
 import rasterio
+from adapter_helpers import make_invalid_completed_run
 from quarry_cli.main import main
+from quarry_core.artifact import ArtifactType
 from quarry_registry.registry import Registry
 from rasterio.crs import CRS
 from rasterio.transform import from_bounds
@@ -433,6 +435,55 @@ class TestRunSampleErrors:
         )
         assert rc == 1
         assert "Invalid --bands" in capsys.readouterr().err
+
+    def test_operator_failure_returns_1(self, raster_path, workspace, capsys):
+        rc = main(
+            [
+                "run",
+                "sample",
+                "--raster",
+                str(raster_path),
+                "--points",
+                str(raster_path),
+                "--workspace",
+                str(workspace),
+            ]
+        )
+        assert rc == 1
+        assert "FAILED:" in capsys.readouterr().err
+
+    def test_invalid_checks_return_2(
+        self,
+        raster_path,
+        points_path,
+        workspace,
+        monkeypatch,
+        capsys,
+    ):
+        monkeypatch.setattr(
+            "quarry_core.executors.local.LocalExecutor.submit",
+            lambda _self, _operator, _inputs, _params: make_invalid_completed_run(
+                workspace,
+                operator_name="sample_raster",
+                artifact_type=ArtifactType.TABLE,
+                output_name="sample/invalid.csv",
+            ),
+        )
+
+        rc = main(
+            [
+                "run",
+                "sample",
+                "--raster",
+                str(raster_path),
+                "--points",
+                str(points_path),
+                "--workspace",
+                str(workspace),
+            ]
+        )
+        assert rc == 2
+        assert "FAILED:" in capsys.readouterr().err
 
 
 # ---------------------------------------------------------------------------

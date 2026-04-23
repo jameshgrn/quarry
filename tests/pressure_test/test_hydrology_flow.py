@@ -432,7 +432,7 @@ class TestFailureIsolation:
         assert result.failed_step == "fill_depressions"
 
     def test_failed_flow_persists_nothing_extra(self, workspace, executor, registry):
-        """Failed flow only persists the input artifact, not outputs."""
+        """Failed flow persists the attempted run, but no output artifacts."""
         bad_art = Artifact(
             type=ArtifactType.VECTOR,
             name="not_a_dem",
@@ -443,9 +443,9 @@ class TestFailureIsolation:
 
         assert not result.success
         stats = registry.stats()
-        # Only the input artifact was saved
+        # Only the input artifact was saved, but the failed run is recorded
         assert stats["artifacts"] == 1
-        assert stats["runs"] == 0
+        assert stats["runs"] == 1
 
 
 # ---------------------------------------------------------------------------

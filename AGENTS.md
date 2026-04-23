@@ -18,7 +18,7 @@ Preserve the ontology. Do not invent parallel abstractions.
 
 5. **Output metadata is always fresh.** Read it from the actual output file. Never copy from input.
 
-6. **Run tests before claiming completion.** `just test` must pass.
+6. **Run targeted pressure tests before claiming completion.** Use `just test <target>` for iteration. Use `just test-all` only as a deliberate full-surface gate.
 
 7. **Do not bypass the registry.** If an artifact exists, it must be registered. If a run happens, it must be recorded.
 
@@ -41,10 +41,8 @@ Preserve the ontology. Do not invent parallel abstractions.
 
 ## Debt list (tolerated, not fires)
 
-- `source_ref: str` in Connector protocol — SourceRef type exists, ConnectorRouter handles routing, protocol update deferred
 - `OperatorSpec.output_type` is singular — will need multi-output when tile-splitting appears
 - `Lineage` on Artifact is a single object — may need append-only for multi-stage provenance
-- Legacy `src/georuntime/` — migration deferred until packages are stable
 - FillDepressions pure-Python loops — numba acceleration deferred until perf measured
 - Flat gradient uses naive BFS — Barnes et al. (2015) optimal flat resolution deferred
 - ZonalStats per-zone rasterization O(zones×pixels) — vectorized groupby deferred until perf measured
@@ -65,7 +63,7 @@ Preserve the ontology. Do not invent parallel abstractions.
 
 **Rules:** Extract one piece at a time. Rewrite to fit quarry contracts. Pressure-test before merging. Do NOT import wholesale.
 
-## Current status (v0.2.0)
+## Current status
 
 Substrate phase is complete. The current surface:
 - 4 connectors: LocalFile, STAC, PostGIS, COG
@@ -74,6 +72,6 @@ Substrate phase is complete. The current surface:
 - 1 executor: LocalExecutor
 - ConnectorRouter for source-ref-based connector selection
 - DuckDB-backed registry with lineage graph
-- 481 tests passing, 18 pressure test suites, zero contract changes
+- Pressure-test counts change; use `just stats` for the current surface
 
 See `examples/watershed_analysis.py` for a canonical end-to-end workflow.

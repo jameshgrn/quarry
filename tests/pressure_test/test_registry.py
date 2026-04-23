@@ -113,6 +113,28 @@ class TestArtifactRoundTrip:
 
         assert recovered.metadata == artifact.metadata
 
+    def test_with_check_does_not_alias_metadata(self, sample_raster, workspace):
+        conn = LocalFileConnector()
+        artifact = conn.materialize(str(sample_raster), workspace).artifact
+
+        updated = artifact.with_check(
+            CRSValid().run(artifact)
+        )
+
+        assert updated.metadata == artifact.metadata
+        assert updated.metadata is not artifact.metadata
+
+    def test_lineage_round_trip(self, sample_raster, workspace, registry):
+        conn = LocalFileConnector()
+        artifact = conn.materialize(str(sample_raster), workspace).artifact
+
+        registry.save_artifact(artifact)
+        recovered = registry.get_artifact(artifact.id)
+
+        assert recovered.lineage is not None
+        assert recovered.lineage.operation == artifact.lineage.operation
+        assert dict(recovered.lineage.params) == dict(artifact.lineage.params)
+
     def test_lazy_artifact_round_trip(self, sample_raster, workspace, registry):
         conn = LocalFileConnector()
         mat = conn.materialize(str(sample_raster), workspace, lazy=True)
@@ -275,6 +297,73 @@ class TestRunRoundTrip:
         for oc, rc in zip(recovered.output.checks, recovered.checks):
             assert oc.check_name == rc.check_name
             assert oc.state == rc.state
+
+    def test_run_persists_output_checks_as_single_source_of_truth(
+        self, sample_raster, workspace, registry
+    ):
+        conn = LocalFileConnector()
+        mat = conn.materialize(str(sample_raster), workspace)
+        registry.save_artifact(mat.artifact)
+
+        output_path = workspace / "output_only_checks.tif"
+        params = ClipRasterParams(
+            bounds=(-5.0, -5.0, 5.0, 5.0),
+            output_path=str(output_path),
+        )
+        record = LocalExecutor().submit(ClipRasterOperator(), [mat.artifact], params)
+        registry.save_run(record)
+
+        recovered = registry.get_run(record.id)
+        assert recovered is not None
+        assert len(recovered.output.checks) > 0
+        assert len(recovered.checks) == len(recovered.output.checks)
+
+    def test_save_run_replaces_existing_run_checks(self, sample_raster, workspace, registry):
+        conn = LocalFileConnector()
+        mat = conn.materialize(str(sample_raster), workspace)
+        registry.save_artifact(mat.artifact)
+
+        output_path = workspace / "idempotent_checks.tif"
+        params = ClipRasterParams(
+            bounds=(-5.0, -5.0, 5.0, 5.0),
+            output_path=str(output_path),
+        )
+        record = LocalExecutor().submit(ClipRasterOperator(), [mat.artifact], params)
+
+        registry.save_run(record)
+        registry.save_run(record)
+
+        recovered = registry.get_run(record.id)
+        assert recovered is not None
+        assert len(recovered.checks) == len(record.checks)
+
+    def test_run_output_result_fields_round_trip(self, sample_raster, workspace, registry):
+        """OperatorResult metadata survives registry round-trip."""
+        conn = LocalFileConnector()
+        mat = conn.materialize(str(sample_raster), workspace)
+        registry.save_artifact(mat.artifact)
+
+        output_path = workspace / "result_fields.tif"
+        params = ClipRasterParams(
+            bounds=(-5.0, -5.0, 5.0, 5.0),
+            output_path=str(output_path),
+        )
+        record = LocalExecutor().submit(ClipRasterOperator(), [mat.artifact], params)
+
+        # Inject ephemeral fields to test persistence
+        record.output.warnings = ["test-warning"]
+        record.output.metadata = {"test-key": "test-value"}
+
+        registry.save_run(record)
+
+        recovered = registry.get_run(record.id)
+        assert recovered is not None
+        assert recovered.output is not None
+        assert recovered.output.timing_seconds is not None
+        assert recovered.output.timing_seconds >= 0
+        assert recovered.output.warnings == ["test-warning"]
+        assert recovered.output.metadata == {"test-key": "test-value"}
+        assert recovered.output.artifact.lineage is not None
 
     def test_list_runs_reconstructs_output(self, sample_raster, workspace, registry):
         """list_runs() should also reconstruct output on each RunRecord."""

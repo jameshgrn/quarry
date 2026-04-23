@@ -26,7 +26,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 import rasterio
+from adapter_helpers import make_materialized_artifact
 from quarry_cli.main import build_parser, main
+from quarry_core.artifact import ArtifactType, CheckResult, ValidationState
+from quarry_operators.hydrology_flow import HydrologyFlowSuccess
 from quarry_registry.registry import Registry
 from rasterio.crs import CRS
 from rasterio.transform import from_bounds
@@ -317,6 +320,36 @@ class TestRunHydrology:
         assert rc == 0
         assert (custom_ws / ".quarry" / "registry.duckdb").exists()
         assert (custom_ws / "hydrology" / "filled_dem.tif").exists()
+
+    def test_invalid_checks_return_2(self, dem_path, workspace, monkeypatch, capsys):
+        invalid = CheckResult(
+            check_name="flow_sane",
+            state=ValidationState.INVALID,
+            message="pressure-test invalid flow",
+        )
+
+        def fake_run(_self, _dem_artifact, _params):
+            return HydrologyFlowSuccess(
+                filled_dem=make_materialized_artifact(
+                    workspace / "hydrology" / "filled_dem.tif",
+                    ArtifactType.RASTER,
+                ),
+                flow_direction=make_materialized_artifact(
+                    workspace / "hydrology" / "flow_direction.tif",
+                    ArtifactType.RASTER,
+                ),
+                flow_accumulation=make_materialized_artifact(
+                    workspace / "hydrology" / "flow_accumulation.tif",
+                    ArtifactType.RASTER,
+                ),
+                all_checks=[invalid],
+            )
+
+        monkeypatch.setattr("quarry_operators.hydrology_flow.HydrologyFlow.run", fake_run)
+
+        rc = main(["run", "hydrology", "--dem", str(dem_path), "--workspace", str(workspace)])
+        assert rc == 2
+        assert "FAILED:" in capsys.readouterr().err
 
 
 # ---------------------------------------------------------------------------

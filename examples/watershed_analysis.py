@@ -35,7 +35,7 @@ from rasterio.transform import from_bounds
 from shapely.geometry import Polygon, mapping
 
 
-def create_synthetic_dem(path: Path, *, rows: int = 64, cols: int = 64) -> Path:
+def create_synthetic_dem(path: Path, *, rows: int = 320, cols: int = 320) -> Path:
     """Generate a synthetic DEM that slopes toward a central valley.
 
     The surface is a parabolic trough along the y-axis with some noise,
@@ -193,6 +193,9 @@ def main() -> None:
         [flow_result.flow_accumulation, zones_artifact],
         zonal_params,
     )
+    if zonal_record.status.value != "completed" or zonal_record.output is None:
+        print(f"  FAILED zonal_stats: {zonal_record.error or 'zonal_stats did not complete'}")
+        sys.exit(1)
     registry.save_run(zonal_record)
 
     zonal_artifact = zonal_record.output.artifact
@@ -226,6 +229,9 @@ def main() -> None:
         [flow_result.flow_accumulation],
         cog_params,
     )
+    if cog_record.status.value != "completed" or cog_record.output is None:
+        print(f"  FAILED build_cog: {cog_record.error or 'build_cog did not complete'}")
+        sys.exit(1)
     registry.save_run(cog_record)
 
     cog_artifact = cog_record.output.artifact

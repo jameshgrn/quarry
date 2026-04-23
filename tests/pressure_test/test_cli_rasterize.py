@@ -27,7 +27,9 @@ import fiona
 import numpy as np
 import pytest
 import rasterio
+from adapter_helpers import make_invalid_completed_run
 from quarry_cli.main import main
+from quarry_core.artifact import ArtifactType
 from quarry_registry.registry import Registry
 from rasterio.crs import CRS
 from shapely.geometry import box, mapping
@@ -186,6 +188,38 @@ class TestRunRasterize:
         assert len(runs) == 1
         assert runs[0].operator_name == "rasterize_vector"
         assert runs[0].status.value == "completed"
+
+    def test_operator_failure_returns_1(self, workspace, capsys):
+        raster_path = workspace / "not_vector.tif"
+        data = np.ones((10, 10), dtype="float32")
+        transform = rasterio.transform.from_bounds(0.0, 0.0, 10.0, 10.0, 10, 10)
+        with rasterio.open(
+            raster_path,
+            "w",
+            driver="GTiff",
+            height=10,
+            width=10,
+            count=1,
+            dtype="float32",
+            crs=CRS.from_epsg(32618),
+            transform=transform,
+        ) as dst:
+            dst.write(data, 1)
+
+        rc = main(
+            [
+                "run",
+                "rasterize",
+                "--vector",
+                str(raster_path),
+                "--workspace",
+                str(workspace),
+                "--resolution",
+                "1.0",
+            ]
+        )
+        assert rc == 1
+        assert "FAILED:" in capsys.readouterr().err
 
 
 # ---------------------------------------------------------------------------
@@ -538,6 +572,32 @@ class TestRunRasterizeErrors:
         )
         assert rc == 1
         assert "Invalid --extent" in capsys.readouterr().err
+
+    def test_invalid_checks_return_2(self, vector_path, workspace, monkeypatch, capsys):
+        monkeypatch.setattr(
+            "quarry_core.executors.local.LocalExecutor.submit",
+            lambda _self, _operator, _inputs, _params: make_invalid_completed_run(
+                workspace,
+                operator_name="rasterize_vector",
+                artifact_type=ArtifactType.RASTER,
+                output_name="rasterize/invalid.tif",
+            ),
+        )
+
+        rc = main(
+            [
+                "run",
+                "rasterize",
+                "--vector",
+                str(vector_path),
+                "--workspace",
+                str(workspace),
+                "--resolution",
+                "1.0",
+            ]
+        )
+        assert rc == 2
+        assert "FAILED:" in capsys.readouterr().err
 
 
 # ---------------------------------------------------------------------------

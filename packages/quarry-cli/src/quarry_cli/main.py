@@ -16,6 +16,29 @@ def _resolve_workspace(args) -> Path:
     return Path(args.workspace).resolve()
 
 
+def _handle_run_failure(run_record) -> int:
+    """Render a failed single-step run consistently for CLI adapters."""
+    if run_record.status.value != "completed":
+        message = run_record.error or f"{run_record.operator_name} did not complete"
+        print(f"FAILED: {message}", file=sys.stderr)
+        return 1
+    if run_record.output is None:
+        print(f"FAILED: {run_record.operator_name} completed without output", file=sys.stderr)
+        return 1
+    return 0
+
+
+def _handle_invalid_checks(checks, subject: str) -> int:
+    """Render semantically invalid output consistently for CLI adapters."""
+    invalid = [c for c in checks if c.state.value == "invalid"]
+    if not invalid:
+        return 0
+    print(f"FAILED: {subject} produced {len(invalid)} invalid check(s)", file=sys.stderr)
+    for c in invalid:
+        print(f"  [{c.check_name}] {c.message}", file=sys.stderr)
+    return 2
+
+
 # ---------------------------------------------------------------------------
 # artifacts list
 # ---------------------------------------------------------------------------
@@ -298,17 +321,15 @@ def cmd_run_hydrology(args) -> int:
         print(f"Error: {flow_result.error}", file=sys.stderr)
         return 1
 
+    invalid_rc = _handle_invalid_checks(flow_result.all_checks, "hydrology")
+    if invalid_rc:
+        return invalid_rc
+
     # Report results
     print(f"\nCompleted ({len(flow_result.runs)} steps, {len(flow_result.all_checks)} checks)")
     for a in flow_result.artifacts:
         uri = a.backing.uri if a.backing else "?"
         print(f"  {a.name:<25} → {uri}")
-
-    invalid = [c for c in flow_result.all_checks if c.state.value == "invalid"]
-    if invalid:
-        print(f"\nWARNING: {len(invalid)} invalid check(s):")
-        for c in invalid:
-            print(f"  [{c.check_name}] {c.message}")
 
     print(f"\nRegistry: {registry.db_path}")
     return 0
@@ -363,30 +384,27 @@ def cmd_run_zonal(args) -> int:
     )
 
     print(f"Running zonal stats → {output_path}")
-    try:
-        run_record = executor.submit(
-            ZonalStatsOperator(),
-            [raster_artifact, zones_artifact],
-            params,
-        )
-    except Exception as e:
-        print(f"FAILED: {e}", file=sys.stderr)
+    run_record = executor.submit(
+        ZonalStatsOperator(),
+        [raster_artifact, zones_artifact],
+        params,
+    )
+    failure_rc = _handle_run_failure(run_record)
+    if failure_rc:
         return 1
 
     # Persist
     registry.save_run(run_record)
+
+    invalid_rc = _handle_invalid_checks(run_record.checks, run_record.operator_name)
+    if invalid_rc:
+        return invalid_rc
 
     # Report
     output = run_record.output.artifact
     uri = output.backing.uri if output.backing else "?"
     print(f"\nCompleted (1 step, {len(run_record.checks)} checks)")
     print(f"  {output.name:<25} → {uri}")
-
-    invalid = [c for c in run_record.checks if c.state.value == "invalid"]
-    if invalid:
-        print(f"\nWARNING: {len(invalid)} invalid check(s):")
-        for c in invalid:
-            print(f"  [{c.check_name}] {c.message}")
 
     print(f"\nRegistry: {registry.db_path}")
     return 0
@@ -453,30 +471,27 @@ def cmd_run_sample(args) -> int:
     )
 
     print(f"Running sample raster → {output_path}")
-    try:
-        run_record = executor.submit(
-            SampleRasterOperator(),
-            [raster_artifact, points_artifact],
-            params,
-        )
-    except Exception as e:
-        print(f"FAILED: {e}", file=sys.stderr)
+    run_record = executor.submit(
+        SampleRasterOperator(),
+        [raster_artifact, points_artifact],
+        params,
+    )
+    failure_rc = _handle_run_failure(run_record)
+    if failure_rc:
         return 1
 
     # Persist
     registry.save_run(run_record)
+
+    invalid_rc = _handle_invalid_checks(run_record.checks, run_record.operator_name)
+    if invalid_rc:
+        return invalid_rc
 
     # Report
     output = run_record.output.artifact
     uri = output.backing.uri if output.backing else "?"
     print(f"\nCompleted (1 step, {len(run_record.checks)} checks)")
     print(f"  {output.name:<25} → {uri}")
-
-    invalid = [c for c in run_record.checks if c.state.value == "invalid"]
-    if invalid:
-        print(f"\nWARNING: {len(invalid)} invalid check(s):")
-        for c in invalid:
-            print(f"  [{c.check_name}] {c.message}")
 
     print(f"\nRegistry: {registry.db_path}")
     return 0
@@ -568,30 +583,27 @@ def cmd_run_rasterize(args) -> int:
     )
 
     print(f"Running rasterize → {output_path}")
-    try:
-        run_record = executor.submit(
-            RasterizeVectorOperator(),
-            [vector_artifact],
-            params,
-        )
-    except Exception as e:
-        print(f"FAILED: {e}", file=sys.stderr)
+    run_record = executor.submit(
+        RasterizeVectorOperator(),
+        [vector_artifact],
+        params,
+    )
+    failure_rc = _handle_run_failure(run_record)
+    if failure_rc:
         return 1
 
     # Persist
     registry.save_run(run_record)
+
+    invalid_rc = _handle_invalid_checks(run_record.checks, run_record.operator_name)
+    if invalid_rc:
+        return invalid_rc
 
     # Report
     output = run_record.output.artifact
     uri = output.backing.uri if output.backing else "?"
     print(f"\nCompleted (1 step, {len(run_record.checks)} checks)")
     print(f"  {output.name:<25} → {uri}")
-
-    invalid = [c for c in run_record.checks if c.state.value == "invalid"]
-    if invalid:
-        print(f"\nWARNING: {len(invalid)} invalid check(s):")
-        for c in invalid:
-            print(f"  [{c.check_name}] {c.message}")
 
     print(f"\nRegistry: {registry.db_path}")
     return 0

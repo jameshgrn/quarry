@@ -11,10 +11,12 @@ from __future__ import annotations
 
 import hashlib
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 
 
@@ -41,6 +43,25 @@ class ValidationState(Enum):
     VALID = "valid"
     INVALID = "invalid"
     WARN = "warn"
+
+
+def _freeze_value(value: Any) -> Any:
+    """Recursively freeze provenance payloads."""
+    if isinstance(value, Mapping):
+        return MappingProxyType({k: _freeze_value(v) for k, v in value.items()})
+    if isinstance(value, list | tuple):
+        return tuple(_freeze_value(v) for v in value)
+    return value
+
+
+def _freeze_params(params: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Freeze lineage params so provenance stays immutable after construction."""
+    return MappingProxyType({k: _freeze_value(v) for k, v in params.items()})
+
+
+def _freeze_metadata(metadata: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Freeze artifact metadata so copies cannot alias mutable nested state."""
+    return MappingProxyType({k: _freeze_value(v) for k, v in metadata.items()})
 
 
 @dataclass(frozen=True)
@@ -74,9 +95,13 @@ class Lineage:
 
     operation: str  # e.g. "clip", "reproject", "materialize"
     inputs: tuple[str, ...] = ()  # artifact IDs that fed this operation
-    params: dict[str, Any] = field(default_factory=dict)
+    params: Mapping[str, Any] = field(default_factory=dict)
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     executor_id: str | None = None  # which executor ran this
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "inputs", tuple(self.inputs))
+        object.__setattr__(self, "params", _freeze_params(self.params))
 
 
 @dataclass(frozen=True)
@@ -89,7 +114,7 @@ class CheckResult:
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
-@dataclass
+@dataclass(frozen=True)
 class Artifact:
     """The canonical internal unit of truth in Quarry.
 
@@ -112,13 +137,17 @@ class Artifact:
     lineage: Lineage | None = None
 
     # Validation state
-    checks: list[CheckResult] = field(default_factory=list)
+    checks: tuple[CheckResult, ...] = field(default_factory=tuple)
 
     # Extensible metadata bag — for driver info, tags, domain-specific fields
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: Mapping[str, Any] = field(default_factory=dict)
 
     # Timestamps
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "checks", tuple(self.checks))
+        object.__setattr__(self, "metadata", _freeze_metadata(self.metadata))
 
     @property
     def validation_state(self) -> ValidationState:
@@ -141,8 +170,7 @@ class Artifact:
 
     def with_check(self, result: CheckResult) -> Artifact:
         """Return a new artifact with an additional check result."""
-        new_checks = [*self.checks, result]
-        # Dataclass isn't frozen so we can mutate, but prefer explicit copy pattern
+        new_checks = (*self.checks, result)
         return Artifact(
             id=self.id,
             type=self.type,

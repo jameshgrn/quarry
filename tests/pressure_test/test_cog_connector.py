@@ -179,7 +179,7 @@ class TestLazyMaterialization:
 
         assert meta["is_cog"] is True
         assert meta["block_size"] == (128, 128)
-        assert meta["overview_levels"] == [2, 4]
+        assert meta["overview_levels"] == (2, 4)
         assert "compression" in meta  # may be None if uncompressed
         assert meta["driver"] == "GTiff"
 

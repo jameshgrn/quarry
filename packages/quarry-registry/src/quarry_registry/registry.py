@@ -13,6 +13,7 @@ Design rules:
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -23,11 +24,21 @@ from quarry_core.artifact import (
     BackingStore,
     BackingStoreKind,
     CheckResult,
+    Lineage,
     SpatialDescriptor,
     ValidationState,
 )
 from quarry_core.executor import RunRecord, RunStatus
 from quarry_core.operator import OperatorResult
+
+
+def _to_jsonable(value):
+    """Convert immutable core payloads into plain JSON-compatible structures."""
+    if isinstance(value, Mapping):
+        return {k: _to_jsonable(v) for k, v in value.items()}
+    if isinstance(value, list | tuple):
+        return [_to_jsonable(v) for v in value]
+    return value
 
 
 class Registry:
@@ -64,6 +75,11 @@ class Registry:
                     resolution_y DOUBLE,
                     feature_count INTEGER,
                     band_count INTEGER,
+                    lineage_operation VARCHAR,
+                    lineage_inputs_json VARCHAR,
+                    lineage_params_json VARCHAR,
+                    lineage_timestamp TIMESTAMP WITH TIME ZONE,
+                    lineage_executor_id VARCHAR,
                     metadata_json VARCHAR,
                     created_at TIMESTAMP WITH TIME ZONE NOT NULL
                 )
@@ -81,6 +97,9 @@ class Registry:
                     submitted_at TIMESTAMP WITH TIME ZONE NOT NULL,
                     started_at TIMESTAMP WITH TIME ZONE,
                     completed_at TIMESTAMP WITH TIME ZONE,
+                    output_timing_seconds DOUBLE,
+                    output_warnings_json VARCHAR,
+                    output_metadata_json VARCHAR,
                     error VARCHAR
                 )
             """)
@@ -110,8 +129,31 @@ class Registry:
                     FOREIGN KEY (run_id) REFERENCES runs(id)
                 )
             """)
+            self._ensure_column(conn, "artifacts", "lineage_operation", "VARCHAR")
+            self._ensure_column(conn, "artifacts", "lineage_inputs_json", "VARCHAR")
+            self._ensure_column(conn, "artifacts", "lineage_params_json", "VARCHAR")
+            self._ensure_column(conn, "artifacts", "lineage_timestamp", "TIMESTAMP WITH TIME ZONE")
+            self._ensure_column(conn, "artifacts", "lineage_executor_id", "VARCHAR")
+            self._ensure_column(conn, "runs", "output_timing_seconds", "DOUBLE")
+            self._ensure_column(conn, "runs", "output_warnings_json", "VARCHAR")
+            self._ensure_column(conn, "runs", "output_metadata_json", "VARCHAR")
         finally:
             conn.close()
+
+    def _ensure_column(
+        self,
+        conn: duckdb.DuckDBPyConnection,
+        table: str,
+        column: str,
+        column_type: str,
+    ) -> None:
+        """Apply additive schema migration for older local registries."""
+        existing = {
+            row[1]
+            for row in conn.execute(f"PRAGMA table_info('{table}')").fetchall()
+        }
+        if column not in existing:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_type}")
 
     # -----------------------------------------------------------------------
     # Artifact operations
@@ -119,42 +161,9 @@ class Registry:
 
     def save_artifact(self, artifact: Artifact) -> None:
         """Persist an artifact to the registry."""
-        extent = artifact.spatial.extent
-        resolution = artifact.spatial.resolution
-
         conn = self._connect()
         try:
-            conn.execute(
-                """
-                INSERT OR REPLACE INTO artifacts (
-                    id, type, name,
-                    backing_kind, backing_uri, backing_size_bytes, backing_content_hash,
-                    crs, extent_xmin, extent_ymin, extent_xmax, extent_ymax,
-                    resolution_x, resolution_y, feature_count, band_count,
-                    metadata_json, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                [
-                    artifact.id,
-                    artifact.type.value,
-                    artifact.name,
-                    artifact.backing.kind.value if artifact.backing else None,
-                    artifact.backing.uri if artifact.backing else None,
-                    artifact.backing.size_bytes if artifact.backing else None,
-                    artifact.backing.content_hash if artifact.backing else None,
-                    artifact.spatial.crs,
-                    extent[0] if extent else None,
-                    extent[1] if extent else None,
-                    extent[2] if extent else None,
-                    extent[3] if extent else None,
-                    resolution[0] if resolution else None,
-                    resolution[1] if resolution else None,
-                    artifact.spatial.feature_count,
-                    artifact.spatial.band_count,
-                    json.dumps(artifact.metadata) if artifact.metadata else None,
-                    artifact.created_at,
-                ],
-            )
+            self._save_artifact_conn(conn, artifact)
         finally:
             conn.close()
 
@@ -226,54 +235,36 @@ class Registry:
         """Persist a run record. Also saves output artifact and checks if present."""
         conn = self._connect()
         try:
-            # Save the run
-            conn.execute(
-                """
-                INSERT OR REPLACE INTO runs (
-                    id, operator_name, status, input_ids_json,
-                    output_artifact_id, params_json,
-                    executor_name, executor_meta_json,
-                    submitted_at, started_at, completed_at, error
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                [
-                    record.id,
-                    record.operator_name,
-                    record.status.value,
-                    json.dumps(record.input_ids),
-                    record.output.artifact.id if record.output else None,
-                    json.dumps(record.params) if record.params else None,
-                    record.executor_name,
-                    json.dumps(record.executor_meta) if record.executor_meta else None,
-                    record.submitted_at,
-                    record.started_at,
-                    record.completed_at,
-                    record.error,
-                ],
-            )
+            conn.execute("BEGIN TRANSACTION")
+            self._save_run_conn(conn, record)
+            self._delete_run_checks_conn(conn, record.id)
+
+            if record.output:
+                self._save_artifact_conn(conn, record.output.artifact)
+
+                for input_id in record.input_ids:
+                    self._save_lineage_conn(
+                        conn,
+                        parent_id=input_id,
+                        child_id=record.output.artifact.id,
+                        operation=record.operator_name,
+                        run_id=record.id,
+                    )
+
+                for check in record.checks:
+                    self._save_check_conn(
+                        conn,
+                        artifact_id=record.output.artifact.id,
+                        check=check,
+                        run_id=record.id,
+                    )
+
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
         finally:
             conn.close()
-
-        # Save output artifact if present
-        if record.output:
-            self.save_artifact(record.output.artifact)
-
-            # Save lineage edges
-            for input_id in record.input_ids:
-                self.save_lineage(
-                    parent_id=input_id,
-                    child_id=record.output.artifact.id,
-                    operation=record.operator_name,
-                    run_id=record.id,
-                )
-
-            # Save checks (attached to artifact AND run)
-            for check in record.checks:
-                self.save_check(
-                    artifact_id=record.output.artifact.id,
-                    check=check,
-                    run_id=record.id,
-                )
 
     def get_run(self, run_id: str) -> RunRecord | None:
         """Load a run record by ID."""
@@ -346,20 +337,7 @@ class Registry:
         """Persist a check result. Links to artifact and optionally to a run."""
         conn = self._connect()
         try:
-            conn.execute(
-                """
-                INSERT INTO checks (artifact_id, run_id, check_name, state, message, checked_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                [
-                    artifact_id,
-                    run_id,
-                    check.check_name,
-                    check.state.value,
-                    check.message,
-                    check.timestamp,
-                ],
-            )
+            self._save_check_conn(conn, artifact_id, check, run_id)
         finally:
             conn.close()
 
@@ -414,13 +392,7 @@ class Registry:
         """Record a lineage edge (parent→child via operation)."""
         conn = self._connect()
         try:
-            conn.execute(
-                """
-                INSERT OR IGNORE INTO lineage (parent_id, child_id, operation, run_id, created_at)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                [parent_id, child_id, operation, run_id, datetime.now(tz=timezone.utc)],
-            )
+            self._save_lineage_conn(conn, parent_id, child_id, operation, run_id)
         finally:
             conn.close()
 
@@ -504,10 +476,22 @@ class Registry:
         """Get registry statistics."""
         conn = self._connect()
         try:
-            artifact_count = conn.execute("SELECT COUNT(*) FROM artifacts").fetchone()[0]
-            run_count = conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0]
-            check_count = conn.execute("SELECT COUNT(*) FROM checks").fetchone()[0]
-            lineage_count = conn.execute("SELECT COUNT(*) FROM lineage").fetchone()[0]
+            artifact_row = conn.execute("SELECT COUNT(*) FROM artifacts").fetchone()
+            run_row = conn.execute("SELECT COUNT(*) FROM runs").fetchone()
+            check_row = conn.execute("SELECT COUNT(*) FROM checks").fetchone()
+            lineage_row = conn.execute("SELECT COUNT(*) FROM lineage").fetchone()
+            if (
+                artifact_row is None
+                or run_row is None
+                or check_row is None
+                or lineage_row is None
+            ):
+                raise RuntimeError("Registry stats query returned no rows")
+
+            artifact_count = artifact_row[0]
+            run_count = run_row[0]
+            check_count = check_row[0]
+            lineage_count = lineage_row[0]
 
             type_counts = conn.execute(
                 "SELECT type, COUNT(*) FROM artifacts GROUP BY type"
@@ -569,6 +553,20 @@ class Registry:
         if data.get("metadata_json"):
             metadata = json.loads(data["metadata_json"])
 
+        lineage = None
+        if data.get("lineage_operation"):
+            lineage = Lineage(
+                operation=data["lineage_operation"],
+                inputs=tuple(json.loads(data["lineage_inputs_json"]))
+                if data.get("lineage_inputs_json")
+                else (),
+                params=json.loads(data["lineage_params_json"])
+                if data.get("lineage_params_json")
+                else {},
+                timestamp=data.get("lineage_timestamp") or data["created_at"],
+                executor_id=data.get("lineage_executor_id"),
+            )
+
         return Artifact(
             id=data["id"],
             type=ArtifactType(data["type"]),
@@ -581,7 +579,8 @@ class Registry:
                 feature_count=data.get("feature_count"),
                 band_count=data.get("band_count"),
             ),
-            checks=checks,
+            lineage=lineage,
+            checks=tuple(checks),
             metadata=metadata,
             created_at=data["created_at"],
         )
@@ -604,7 +603,17 @@ class Registry:
         if output_artifact_id:
             artifact = self.get_artifact(output_artifact_id)
             if artifact:
-                output = OperatorResult(artifact=artifact, checks=checks)
+                output = OperatorResult(
+                    artifact=artifact,
+                    checks=checks,
+                    warnings=json.loads(data["output_warnings_json"])
+                    if data.get("output_warnings_json")
+                    else [],
+                    timing_seconds=data.get("output_timing_seconds"),
+                    metadata=json.loads(data["output_metadata_json"])
+                    if data.get("output_metadata_json")
+                    else {},
+                )
 
         return RunRecord(
             id=data["id"],
@@ -621,5 +630,132 @@ class Registry:
             started_at=data.get("started_at"),
             completed_at=data.get("completed_at"),
             error=data.get("error"),
-            checks=checks,
+        )
+
+    def _save_artifact_conn(self, conn: duckdb.DuckDBPyConnection, artifact: Artifact) -> None:
+        """Persist an artifact using an existing connection."""
+        extent = artifact.spatial.extent
+        resolution = artifact.spatial.resolution
+        lineage = artifact.lineage
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO artifacts (
+                id, type, name,
+                backing_kind, backing_uri, backing_size_bytes, backing_content_hash,
+                crs, extent_xmin, extent_ymin, extent_xmax, extent_ymax,
+                resolution_x, resolution_y, feature_count, band_count,
+                lineage_operation, lineage_inputs_json, lineage_params_json,
+                lineage_timestamp, lineage_executor_id,
+                metadata_json, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                artifact.id,
+                artifact.type.value,
+                artifact.name,
+                artifact.backing.kind.value if artifact.backing else None,
+                artifact.backing.uri if artifact.backing else None,
+                artifact.backing.size_bytes if artifact.backing else None,
+                artifact.backing.content_hash if artifact.backing else None,
+                artifact.spatial.crs,
+                extent[0] if extent else None,
+                extent[1] if extent else None,
+                extent[2] if extent else None,
+                extent[3] if extent else None,
+                resolution[0] if resolution else None,
+                resolution[1] if resolution else None,
+                artifact.spatial.feature_count,
+                artifact.spatial.band_count,
+                lineage.operation if lineage else None,
+                json.dumps(list(lineage.inputs)) if lineage else None,
+                json.dumps(_to_jsonable(lineage.params)) if lineage else None,
+                lineage.timestamp if lineage else None,
+                lineage.executor_id if lineage else None,
+                json.dumps(_to_jsonable(artifact.metadata)) if artifact.metadata else None,
+                artifact.created_at,
+            ],
+        )
+
+    def _save_run_conn(self, conn: duckdb.DuckDBPyConnection, record: RunRecord) -> None:
+        """Persist a run using an existing connection."""
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO runs (
+                id, operator_name, status, input_ids_json,
+                output_artifact_id, params_json,
+                executor_name, executor_meta_json,
+                submitted_at, started_at, completed_at,
+                output_timing_seconds, output_warnings_json, output_metadata_json,
+                error
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                record.id,
+                record.operator_name,
+                record.status.value,
+                json.dumps(record.input_ids),
+                record.output.artifact.id if record.output else None,
+                json.dumps(_to_jsonable(record.params)) if record.params else None,
+                record.executor_name,
+                json.dumps(_to_jsonable(record.executor_meta)) if record.executor_meta else None,
+                record.submitted_at,
+                record.started_at,
+                record.completed_at,
+                record.output.timing_seconds if record.output else None,
+                json.dumps(_to_jsonable(record.output.warnings))
+                if record.output and record.output.warnings
+                else None,
+                json.dumps(_to_jsonable(record.output.metadata))
+                if record.output and record.output.metadata
+                else None,
+                record.error,
+            ],
+        )
+
+    def _save_check_conn(
+        self,
+        conn: duckdb.DuckDBPyConnection,
+        artifact_id: str,
+        check: CheckResult,
+        run_id: str | None = None,
+    ) -> None:
+        """Persist a check using an existing connection."""
+        conn.execute(
+            """
+            INSERT INTO checks (artifact_id, run_id, check_name, state, message, checked_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            [
+                artifact_id,
+                run_id,
+                check.check_name,
+                check.state.value,
+                check.message,
+                check.timestamp,
+            ],
+        )
+
+    def _delete_run_checks_conn(
+        self,
+        conn: duckdb.DuckDBPyConnection,
+        run_id: str,
+    ) -> None:
+        """Replace semantics for run-linked checks during save_run()."""
+        conn.execute("DELETE FROM checks WHERE run_id = ?", [run_id])
+
+    def _save_lineage_conn(
+        self,
+        conn: duckdb.DuckDBPyConnection,
+        parent_id: str,
+        child_id: str,
+        operation: str,
+        run_id: str | None = None,
+    ) -> None:
+        """Persist a lineage edge using an existing connection."""
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO lineage (parent_id, child_id, operation, run_id, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            [parent_id, child_id, operation, run_id, datetime.now(tz=timezone.utc)],
         )

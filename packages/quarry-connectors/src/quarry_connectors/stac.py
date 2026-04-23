@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
 import pystac
@@ -40,6 +40,9 @@ from quarry_core.connector import (
     MaterializeError,
     MaterializeResult,
 )
+
+if TYPE_CHECKING:
+    from quarry_core.source_ref import SourceRef
 
 # Map STAC media types to artifact types
 _RASTER_MEDIA_TYPES = {
@@ -113,7 +116,7 @@ class STACConnector:
 
     def materialize(
         self,
-        source_ref: str,
+        source_ref: SourceRef | str,
         workspace: Path,
         *,
         lazy: bool = False,
@@ -258,7 +261,7 @@ class STACConnector:
 
         return entries
 
-    def metadata(self, source_ref: str) -> dict[str, Any]:
+    def metadata(self, source_ref: SourceRef | str) -> dict[str, Any]:
         """Get full STAC item metadata without downloading any assets."""
         item, asset_key = self._resolve_source_ref(source_ref)
         asset = self._select_asset(item, asset_key)
@@ -281,7 +284,7 @@ class STACConnector:
     # Private: source_ref resolution
     # -----------------------------------------------------------------------
 
-    def _resolve_source_ref(self, source_ref: str) -> tuple[pystac.Item, str]:
+    def _resolve_source_ref(self, source_ref: SourceRef | str) -> tuple[pystac.Item, str]:
         """Parse source_ref and fetch the STAC item.
 
         Returns (item, asset_key).

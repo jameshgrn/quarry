@@ -579,7 +579,7 @@ def test_lineage_records_params(op, workspace):
     assert lineage.params["burn_value"] == 42.0
     assert lineage.params["nodata"] == -1.0
     assert lineage.params["dtype"] == "float32"
-    assert lineage.params["resolution"] == [1.0, 1.0]
+    assert lineage.params["resolution"] == (1.0, 1.0)
 
 
 # ---------------------------------------------------------------------------

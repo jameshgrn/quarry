@@ -39,8 +39,12 @@ class TestSimpleConstruction:
     def test_local_path(self):
         ref = SourceRef.local("/data/dem.tif")
         assert ref.raw == "/data/dem.tif"
-        assert ref.kind == SourceRefKind.LOCAL_PATH
+        assert ref.kind == SourceRefKind.LOCAL_RASTER
         assert str(ref) == "/data/dem.tif"
+
+    def test_local_vector_path(self):
+        ref = SourceRef.local("/data/parcels.geojson")
+        assert ref.kind == SourceRefKind.LOCAL_VECTOR
 
     def test_remote_uri(self):
         url = "https://storage.googleapis.com/bucket/dem.tif"
@@ -147,11 +151,11 @@ class TestInfer:
 
     def test_infer_local_path(self):
         ref = SourceRef.infer("/data/dem.tif")
-        assert ref.kind == SourceRefKind.LOCAL_PATH
+        assert ref.kind == SourceRefKind.LOCAL_RASTER
 
     def test_infer_relative_path(self):
         ref = SourceRef.infer("./relative/file.gpkg")
-        assert ref.kind == SourceRefKind.LOCAL_PATH
+        assert ref.kind == SourceRefKind.LOCAL_VECTOR
 
     def test_infer_http_url(self):
         ref = SourceRef.infer("https://example.com/raster.tif")
@@ -188,7 +192,7 @@ class TestInfer:
     def test_infer_dotted_path_with_extension(self):
         """A path like 'dir.name/file.tif' should NOT be classified as database."""
         ref = SourceRef.infer("/dir.name/file.tif")
-        assert ref.kind == SourceRefKind.LOCAL_PATH
+        assert ref.kind == SourceRefKind.LOCAL_RASTER
 
     def test_infer_ambiguous_stays_unknown(self):
         """Truly ambiguous refs classify as UNKNOWN — infer is honest."""
@@ -265,6 +269,11 @@ class TestImmutability:
         # Can be used as dict key
         d = {ref: "value"}
         assert d[ref] == "value"
+
+    def test_params_are_immutable(self):
+        ref = SourceRef.local("/path/file.tif")
+        with pytest.raises(TypeError):
+            ref.params["path"] = "/elsewhere/file.tif"
 
 
 # ---------------------------------------------------------------------------

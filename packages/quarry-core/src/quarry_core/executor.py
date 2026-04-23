@@ -60,9 +60,6 @@ class RunRecord:
     # Output (populated on completion)
     output: OperatorResult | None = None
 
-    # Validation
-    checks: list[CheckResult] = field(default_factory=list)
-
     # Timing
     submitted_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     started_at: datetime | None = None
@@ -74,6 +71,13 @@ class RunRecord:
 
     # Error info (populated on failure)
     error: str | None = None
+
+    @property
+    def checks(self) -> tuple[CheckResult, ...]:
+        """Validation truth derives from the output operator result."""
+        if self.output is None:
+            return ()
+        return tuple(self.output.checks)
 
     @property
     def duration_seconds(self) -> float | None:
@@ -113,7 +117,8 @@ class Executor(Protocol):
         """Submit an operator for execution.
 
         This may be synchronous (LocalExecutor) or async (Dask/SLURM).
-        Either way, it returns a RunRecord immediately.
+        Either way, it returns a RunRecord immediately. Validation or execution
+        failure is represented as a FAILED RunRecord, not an exception side channel.
 
         Args:
             operator: The operator to run.
@@ -121,7 +126,8 @@ class Executor(Protocol):
             params: Typed parameters for the operator.
 
         Returns:
-            RunRecord with at minimum an ID and PENDING/RUNNING status.
+            RunRecord with lifecycle status populated. Backends may return a
+            completed/failed record immediately or a pending/running record for async work.
         """
         ...
 

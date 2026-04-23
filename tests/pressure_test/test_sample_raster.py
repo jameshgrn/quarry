@@ -575,7 +575,7 @@ def test_lineage_records_params(op, workspace):
 
     assert result.artifact.lineage is not None
     assert result.artifact.lineage.operation == "sample_raster"
-    assert result.artifact.lineage.params["bands"] == [1]
+    assert result.artifact.lineage.params["bands"] == (1,)
     assert set(result.artifact.lineage.inputs) == {raster_art.id, vector_art.id}
 
 

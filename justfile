@@ -1,18 +1,23 @@
 # Quarry canonical commands
 
-# Default: run all pressure tests
-default: test
+# Default: show available commands
+default:
+    @just --list
 
-# Run all pressure tests
-test:
+# Run a targeted pressure test file or subset
+test TARGET:
+    PYTHONPATH="packages/quarry-core/src:packages/quarry-connectors/src:packages/quarry-operators/src:packages/quarry-registry/src:packages/quarry-cli/src" uv run pytest {{TARGET}} -v
+
+# Run the full pressure gate
+test-all:
     PYTHONPATH="packages/quarry-core/src:packages/quarry-connectors/src:packages/quarry-operators/src:packages/quarry-registry/src:packages/quarry-cli/src" uv run pytest tests/pressure_test/ -v
 
 # Run a specific test file
 test-file FILE:
-    PYTHONPATH="packages/quarry-core/src:packages/quarry-connectors/src:packages/quarry-operators/src:packages/quarry-registry/src:packages/quarry-cli/src" uv run pytest {{FILE}} -v
+    @just test {{FILE}}
 
 # Run tests quietly (CI mode)
-test-quiet:
+test-all-quiet:
     PYTHONPATH="packages/quarry-core/src:packages/quarry-connectors/src:packages/quarry-operators/src:packages/quarry-registry/src:packages/quarry-cli/src" uv run pytest tests/pressure_test/ -q
 
 # Lint all packages

@@ -37,14 +37,14 @@ quarry/
     quarry-connectors/ # Connector implementations
     quarry-operators/  # Operator implementations
     quarry-cli/        # CLI adapter (argparse, depends on all four above)
-  src/georuntime/      # Legacy prototype (DO NOT MODIFY)
 ```
 
 ## Canonical Commands
 
 ```sh
-just test          # Run all pressure tests
-just test-file F   # Run specific test file
+just test F        # Run a targeted pressure test file or subset
+just test-all      # Run the full pressure gate
+just test-file F   # Alias for targeted test execution
 just lint          # Ruff check
 just fmt           # Ruff format
 just lock          # uv lock
@@ -75,10 +75,8 @@ just tree          # Show package dependency graph
 
 ## Scheduled Debt
 
-- `source_ref: str` in Connector protocol — SourceRef type exists, ConnectorRouter handles routing, protocol update deferred
 - `OperatorSpec.output_type` singular — multi-output deferred until tile-splitting
 - `Lineage` single object — may need append-only for multi-stage provenance
-- Legacy `src/georuntime/` — migration deferred
 - FillDepressions pure-Python loops — numba acceleration deferred until perf measured
 - Flat gradient uses naive BFS — Barnes et al. (2015) optimal flat resolution deferred
 - ZonalStats per-zone rasterization O(zones×pixels) — vectorized groupby deferred until perf measured
@@ -90,19 +88,18 @@ just tree          # Show package dependency graph
 - RasterizeVector no all_touched option — deferred until needed
 - CLI exposes hydrology + zonal + sample + rasterize flows — generic operator dispatch deferred
 - CLI plain text output only — JSON mode deferred until needed
-- Registry `get_run()` does not persist `OperatorResult.warnings`, `timing_seconds`, or `metadata` — ephemeral execution details lost on round-trip
 - Operator string params (`compress`, `resampling`, `predicate`) validated against hardcoded tuples — `Literal` types deferred (large surface area)
 - `HydrologyFlow._execute_step` mutates input lists AND returns a value — mixed contract, single caller, low urgency
 
-## Substrate Phase (v0.1.0) — COMPLETE
+## Substrate Phase — COMPLETE
 
 Substrate phase is complete. All criteria met:
-- Core ontology stable — zero contract changes across 18 pressure test suites
+- Core ontology stable across the pressure surface
 - 4 connectors: LocalFile, STAC, PostGIS, COG
 - 10 operators: ClipRaster, Reproject, FillDepressions, D8FlowDirection, FlowAccumulation, ZonalStats, SpatialJoin, BuildCOG, SampleRaster, RasterizeVector
 - Registry persists artifacts/runs/checks/lineage
 - End-to-end flow works (HydrologyFlow + zonal stats + COG export)
-- 495 tests passing (20 pressure test suites)
+- Use `just stats` for current collected test counts
 
 ## v0.2.0 Milestone — Consolidation & Legibility — COMPLETE
 
@@ -115,7 +112,7 @@ Substrate phase is complete. All criteria met:
 - `quarry-cli` package: minimal CLI invocation surface (lane: adapter)
 - Commands: `quarry artifacts list/show`, `quarry lineage`, `quarry runs list/show`, `quarry checks show`, `quarry run hydrology`, `quarry run zonal`, `quarry run sample`, `quarry run rasterize`
 - Zero new dependencies (argparse only)
-- 96 pressure tests for CLI adapter (19 base + 12 zonal + 20 inspection + 19 sample + 26 rasterize)
+- Adapter behavior is pressure-tested across the CLI surface
 
 ## What NOT to build yet
 

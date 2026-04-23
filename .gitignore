@@ -16,7 +16,7 @@ venv/
 .idea/
 
 # Runtime
-.georuntime/
+.quarry/
 
 # OS
 .DS_Store

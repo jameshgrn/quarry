@@ -19,24 +19,53 @@ Design principles:
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum
+from types import MappingProxyType
 from typing import Any
 
 
 class SourceRefKind(Enum):
     """Classification of source reference shapes."""
 
-    LOCAL_PATH = "local_path"  # filesystem path
+    LOCAL_PATH = "local_path"  # local filesystem path of unknown geospatial kind
+    LOCAL_RASTER = "local_raster"  # local raster path
+    LOCAL_VECTOR = "local_vector"  # local vector/table path
     REMOTE_URI = "remote_uri"  # http/https/s3/gs URL
     CATALOG_ITEM = "catalog_item"  # catalog/collection reference (STAC-like)
     DATABASE_REF = "database_ref"  # schema.table or SQL query
     UNKNOWN = "unknown"  # unclassified raw string
 
 
-def _freeze_params(params: dict[str, Any]) -> dict[str, Any]:
-    """Return a shallow copy of params for immutability."""
-    return dict(params)
+RASTER_EXTENSIONS = {".tif", ".tiff", ".geotiff", ".jp2", ".hgt", ".nc", ".vrt"}
+VECTOR_EXTENSIONS = {".shp", ".geojson", ".gpkg", ".kml", ".gml", ".fgb", ".parquet"}
+
+
+def _freeze_value(value: Any) -> Any:
+    """Recursively freeze nested params so frozen dataclasses stay semantically immutable."""
+    if isinstance(value, Mapping):
+        return MappingProxyType({k: _freeze_value(v) for k, v in value.items()})
+    if isinstance(value, list | tuple):
+        return tuple(_freeze_value(v) for v in value)
+    return value
+
+
+def _freeze_params(params: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Freeze params into an immutable mapping."""
+    return MappingProxyType({k: _freeze_value(v) for k, v in params.items()})
+
+
+def _classify_local_path(path: str) -> SourceRefKind:
+    """Classify a local path by geospatial file kind when the extension is known."""
+    lower = path.lower()
+    for ext in RASTER_EXTENSIONS:
+        if lower.endswith(ext):
+            return SourceRefKind.LOCAL_RASTER
+    for ext in VECTOR_EXTENSIONS:
+        if lower.endswith(ext):
+            return SourceRefKind.LOCAL_VECTOR
+    return SourceRefKind.LOCAL_PATH
 
 
 @dataclass(frozen=True)
@@ -49,7 +78,10 @@ class SourceRef:
 
     raw: str
     kind: SourceRefKind = SourceRefKind.UNKNOWN
-    params: dict[str, Any] = field(default_factory=dict, hash=False, compare=True)
+    params: Mapping[str, Any] = field(default_factory=dict, hash=False, compare=True)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "params", _freeze_params(self.params))
 
     def __str__(self) -> str:
         """Return raw string — always works where source_ref: str is expected."""
@@ -72,7 +104,7 @@ class SourceRef:
         """Construct a local path reference."""
         return cls(
             raw=path,
-            kind=SourceRefKind.LOCAL_PATH,
+            kind=_classify_local_path(path),
             params={"path": path},
         )
 
@@ -141,8 +173,8 @@ class SourceRef:
         Classification priority:
         1. URL schemes (http, https, s3, gs, az) → REMOTE_URI
         2. SQL query (starts with SELECT) → DATABASE_REF
-        3. Absolute/relative path (starts with /, ./, ../) → LOCAL_PATH
-        4. Path with file extension and separators → LOCAL_PATH
+        3. Absolute/relative path (starts with /, ./, ../) → LOCAL_* kind
+        4. Path with file extension and separators → LOCAL_* kind
         5. STAC pattern (word/word or word/word::word) → CATALOG_ITEM
         6. Database pattern (word.word, no path separators or extension) → DATABASE_REF
         7. Otherwise → UNKNOWN
@@ -174,7 +206,7 @@ class SourceRef:
         if stripped.startswith("/") or stripped.startswith("./") or stripped.startswith("../"):
             return cls(
                 raw=raw,
-                kind=SourceRefKind.LOCAL_PATH,
+                kind=_classify_local_path(stripped),
                 params={"path": stripped},
             )
 
@@ -183,7 +215,7 @@ class SourceRef:
             # Looks like a path with filename.ext
             return cls(
                 raw=raw,
-                kind=SourceRefKind.LOCAL_PATH,
+                kind=_classify_local_path(stripped),
                 params={"path": stripped},
             )
 

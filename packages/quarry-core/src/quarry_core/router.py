@@ -65,9 +65,11 @@ class ConnectorRouter:
 
     Usage:
         router = ConnectorRouter()
-        router.register(local_conn, kinds={SourceRefKind.LOCAL_PATH}, priority=10)
+        kinds = {SourceRefKind.LOCAL_PATH, SourceRefKind.LOCAL_RASTER, SourceRefKind.LOCAL_VECTOR}
+        router.register(local_conn, kinds=kinds, priority=10)
         kinds = {SourceRefKind.LOCAL_PATH, SourceRefKind.REMOTE_URI}
-        router.register(cog_conn, kinds=kinds, priority=0)
+        cog_kinds = {SourceRefKind.LOCAL_RASTER, SourceRefKind.REMOTE_URI}
+        router.register(cog_conn, kinds=cog_kinds, priority=0)
         router.register(stac_conn, kinds={SourceRefKind.CATALOG_ITEM})
         router.register(pg_conn, kinds={SourceRefKind.DATABASE_REF})
 

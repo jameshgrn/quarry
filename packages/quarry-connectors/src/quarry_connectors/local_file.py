@@ -10,6 +10,7 @@ For vectors: uses fiona to extract spatial metadata.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from quarry_core.artifact import (
     Artifact,
@@ -26,6 +27,10 @@ from quarry_core.connector import (
     MaterializeError,
     MaterializeResult,
 )
+
+if TYPE_CHECKING:
+    from quarry_core.source_ref import SourceRef
+
 
 RASTER_EXTENSIONS = {".tif", ".tiff", ".geotiff", ".jp2", ".hgt", ".nc", ".vrt"}
 VECTOR_EXTENSIONS = {".shp", ".geojson", ".gpkg", ".kml", ".gml", ".fgb", ".parquet"}
@@ -48,7 +53,7 @@ class LocalFileConnector:
 
     def materialize(
         self,
-        source_ref: str,
+        source_ref: SourceRef | str,
         workspace: Path,
         *,
         lazy: bool = False,
@@ -113,7 +118,7 @@ class LocalFileConnector:
 
         return entries
 
-    def metadata(self, source_ref: str) -> dict:
+    def metadata(self, source_ref: SourceRef | str) -> dict:
         """Get metadata without full materialization."""
         path = Path(source_ref).resolve()
         if not path.exists():

@@ -7,12 +7,22 @@ Just: validate, execute, capture result, produce RunRecord.
 from __future__ import annotations
 
 import uuid
+from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 from time import perf_counter
 
 from quarry_core.artifact import Artifact
-from quarry_core.executor import RunNotFoundError, RunRecord, RunStatus, SubmitError
-from quarry_core.operator import Operator, OperatorError, OperatorParams, ValidationError
+from quarry_core.executor import RunNotFoundError, RunRecord, RunStatus
+from quarry_core.operator import Operator, OperatorParams
+
+
+def _serialize_params(params: OperatorParams) -> dict:
+    """Convert typed params to a plain dict for RunRecord persistence."""
+    if is_dataclass(params):
+        return asdict(params)
+    if hasattr(params, "__dict__"):
+        return dict(vars(params))
+    return {}
 
 
 class LocalExecutor:
@@ -38,7 +48,7 @@ class LocalExecutor:
             operator_name=operator.name,
             status=RunStatus.PENDING,
             input_ids=[a.id for a in inputs],
-            params=vars(params) if hasattr(params, "__dict__") else {},
+            params=_serialize_params(params),
             executor_name=self.name,
         )
 
@@ -48,7 +58,8 @@ class LocalExecutor:
             record.status = RunStatus.FAILED
             record.error = f"Validation failed: {'; '.join(errors)}"
             self._runs[run_id] = record
-            raise ValidationError(operator.name, errors)
+            record.completed_at = datetime.now(tz=timezone.utc)
+            return record
 
         # Execute
         record.status = RunStatus.RUNNING
@@ -62,22 +73,12 @@ class LocalExecutor:
             record.status = RunStatus.COMPLETED
             record.completed_at = datetime.now(tz=timezone.utc)
             record.output = result
-            record.checks = result.checks
             result.timing_seconds = elapsed
-
-        except OperatorError as e:
-            record.status = RunStatus.FAILED
-            record.completed_at = datetime.now(tz=timezone.utc)
-            record.error = str(e)
-            self._runs[run_id] = record
-            raise SubmitError(operator.name, str(e)) from e
 
         except Exception as e:
             record.status = RunStatus.FAILED
             record.completed_at = datetime.now(tz=timezone.utc)
-            record.error = f"Unexpected error: {e}"
-            self._runs[run_id] = record
-            raise SubmitError(operator.name, f"Unexpected: {e}") from e
+            record.error = str(e)
 
         self._runs[run_id] = record
         return record

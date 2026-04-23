@@ -19,9 +19,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Flag, auto
 from pathlib import Path
-from typing import Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from quarry_core.artifact import Artifact
+
+if TYPE_CHECKING:
+    from quarry_core.source_ref import SourceRef
 
 # ---------------------------------------------------------------------------
 # Capability flags
@@ -51,7 +54,7 @@ class CatalogEntry:
     This is what `discover` returns — a reference that can be passed to `materialize`.
     """
 
-    source_ref: str  # The reference materialize needs (path, URL, asset ID, etc.)
+    source_ref: SourceRef | str  # The reference materialize needs (path, URL, asset ID, etc.)
     name: str = ""
     description: str = ""
     spatial_hint: dict[str, Any] = field(default_factory=dict)  # CRS, extent if known
@@ -64,7 +67,7 @@ class MaterializeResult:
 
     artifact: Artifact
     strategy: str  # "copied", "wrapped_local", "fetched_remote", "lazy_handle", "normalized"
-    source_ref: str  # Original source reference
+    source_ref: SourceRef | str  # Original source reference
     notes: str = ""  # Any additional context
 
 
@@ -93,7 +96,7 @@ class Connector(Protocol):
 
     def materialize(
         self,
-        source_ref: str,
+        source_ref: SourceRef | str,
         workspace: Path,
         *,
         lazy: bool = False,
@@ -156,7 +159,7 @@ class Authenticatable(Protocol):
 class MetadataEmitter(Protocol):
     """A connector that can emit metadata without fetching data."""
 
-    def metadata(self, source_ref: str) -> dict[str, Any]:
+    def metadata(self, source_ref: SourceRef | str) -> dict[str, Any]:
         """Get metadata about a source without materializing it.
 
         Args:
@@ -180,7 +183,7 @@ class ConnectorError(Exception):
 class MaterializeError(ConnectorError):
     """Materialization failed."""
 
-    def __init__(self, source_ref: str, reason: str):
+    def __init__(self, source_ref: SourceRef | str, reason: str):
         self.source_ref = source_ref
         self.reason = reason
         super().__init__(f"Failed to materialize '{source_ref}': {reason}")

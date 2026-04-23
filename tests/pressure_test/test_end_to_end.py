@@ -246,7 +246,6 @@ class TestExecutorLifecycle:
 
     def test_executor_captures_validation_failure(self, workspace):
         from quarry_core.artifact import Artifact, BackingStore
-        from quarry_core.operator import ValidationError
 
         bad_input = Artifact(
             type=ArtifactType.VECTOR,
@@ -257,8 +256,10 @@ class TestExecutorLifecycle:
         op = ClipRasterOperator()
         executor = LocalExecutor()
 
-        with pytest.raises(ValidationError):
-            executor.submit(op, [bad_input], params)
+        record = executor.submit(op, [bad_input], params)
+        assert record.status == RunStatus.FAILED
+        assert record.error is not None
+        assert "Validation failed" in record.error
 
     def test_run_record_retrievable(self, sample_raster, workspace):
         conn = LocalFileConnector()
