@@ -11,7 +11,7 @@ The internal unit of truth. NOT a file.
 - **SpatialDescriptor** holds CRS, extent, resolution, feature_count, band_count. Populated from actual data, not guessed.
 - **Lineage** records how the artifact was created (operation, input IDs, params, timestamp) and persists with the artifact itself.
 - **Checks** accumulate from the checks table. Artifact exposes `validation_state` derived from accumulated check results.
-- **Metadata** is an extensible dict for driver info, domain tags, platform info, etc.
+- **Metadata** is an opaque connector extension bag for source-specific, non-canonical descriptive context (driver, theme, layer name, dataset identity). Must never duplicate or override typed artifact contract fields (`spatial`, `lineage`). Operators must not depend on metadata keys.
 
 Mutability rules:
 - `id`, `type`: immutable

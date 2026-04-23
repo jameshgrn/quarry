@@ -323,7 +323,7 @@ class TestOpenTopoLazyMaterialization:
         assert spatial.band_count == 1
 
     def test_lazy_api_url_in_backing_uri(self, connector_with_key, valid_bbox, tmp_path):
-        """Lazy handle URI contains the API URL with all parameters."""
+        """Lazy handle URI contains the API URL but NOT the API key."""
         ref = SourceRef(raw="SRTMGL1", params={"bbox": valid_bbox})
         result = connector_with_key.materialize(ref, tmp_path, lazy=True)
 
@@ -334,7 +334,9 @@ class TestOpenTopoLazyMaterialization:
         assert "south=35.0" in uri
         assert "east=-119.0" in uri
         assert "north=36.0" in uri
-        assert "API_Key=test_api_key_12345" in uri
+        # API key must NOT leak into artifact URIs
+        assert "API_Key" not in uri
+        assert "test_api_key_12345" not in uri
 
     def test_lazy_lineage_records_lazy_flag(self, connector_no_key, valid_bbox, tmp_path):
         """Lineage records lazy=True."""
@@ -501,14 +503,14 @@ class TestOpenTopoErrors:
         assert "api_key" in str(exc_info.value)
 
     def test_authenticate_sets_api_key(self, connector_no_key):
-        """authenticate() sets the API key."""
+        """authenticate() sets the API key (verified via internal state, not URI)."""
         connector_no_key.authenticate({"api_key": "new_key_123"})
+        assert connector_no_key._api_key == "new_key_123"
 
-        # Verify by checking lazy materialization includes key in URL
+        # Verify lazy URI does NOT leak the key
         ref = SourceRef(raw="SRTMGL1", params={"bbox": (-120, 35, -119, 36)})
         result = connector_no_key.materialize(ref, MagicMock(), lazy=True)
-
-        assert "new_key_123" in result.artifact.backing.uri
+        assert "new_key_123" not in result.artifact.backing.uri
 
 
 # ---------------------------------------------------------------------------

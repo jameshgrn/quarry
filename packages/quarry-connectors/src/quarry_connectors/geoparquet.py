@@ -25,10 +25,19 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import fiona
-import pyarrow as pa
-import pyarrow.parquet as pq
 import shapely.io
 from fiona.crs import CRS
+
+# pyarrow is an optional dependency (install via quarry-connectors[geoparquet])
+try:
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    HAS_PYARROW = True
+except ImportError:
+    HAS_PYARROW = False
+    pa = None  # type: ignore[assignment]
+    pq = None  # type: ignore[assignment]
 from quarry_core.artifact import (
     Artifact,
     ArtifactType,
@@ -51,12 +60,14 @@ if TYPE_CHECKING:
 
 def _is_geoparquet(path: Path) -> bool:
     """Check if a parquet file has geo metadata (is a GeoParquet file)."""
+    if not HAS_PYARROW:
+        return False
     try:
         pf = pq.ParquetFile(str(path))
         metadata = pf.schema_arrow.metadata
         if metadata and b"geo" in metadata:
             return True
-    except Exception:
+    except (OSError, pa.ArrowInvalid, pa.ArrowIOError):
         pass
     return False
 
@@ -67,12 +78,14 @@ def _read_geo_metadata(path: Path) -> dict[str, Any] | None:
     Returns the parsed JSON from the "geo" key in Arrow schema metadata,
     or None if not present or invalid.
     """
+    if not HAS_PYARROW:
+        return None
     try:
         pf = pq.ParquetFile(str(path))
         metadata = pf.schema_arrow.metadata
         if metadata and b"geo" in metadata:
             return json.loads(metadata[b"geo"])
-    except Exception:
+    except (OSError, pa.ArrowInvalid, pa.ArrowIOError, json.JSONDecodeError):
         pass
     return None
 
@@ -93,7 +106,7 @@ def _extract_extent_from_geo_metadata(
         bbox = col_meta.get("bbox")
         if bbox and len(bbox) == 4:
             return (float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3]))
-    except Exception:
+    except (KeyError, TypeError, ValueError):
         pass
     return None
 
@@ -121,7 +134,7 @@ def _extract_crs_from_geo_metadata(geo_meta: dict[str, Any]) -> str | None:
         crs = geo_meta.get("crs")
         if crs:
             return str(crs)
-    except Exception:
+    except (KeyError, TypeError):
         pass
     return None
 
@@ -134,7 +147,7 @@ def _extract_srid_from_crs(crs_str: str | None) -> int | None:
         if "EPSG:" in crs_str.upper():
             code = crs_str.split(":")[-1]
             return int(code)
-    except Exception:
+    except (ValueError, AttributeError):
         pass
     return None
 
@@ -169,6 +182,12 @@ class GeoParquetConnector:
 
         source_ref: path to .parquet or .geoparquet file
         """
+        if not HAS_PYARROW:
+            raise MaterializeError(
+                source_ref,
+                "pyarrow is required for GeoParquet. "
+                "Install with: uv pip install quarry-connectors[geoparquet]",
+            )
         path = self._parse_source_ref(source_ref)
 
         if not path.exists():
@@ -296,6 +315,12 @@ class GeoParquetConnector:
 
     def metadata(self, source_ref: SourceRef | str) -> dict[str, Any]:
         """Get file metadata without materializing data."""
+        if not HAS_PYARROW:
+            raise MaterializeError(
+                source_ref,
+                "pyarrow is required for GeoParquet. "
+                "Install with: uv pip install quarry-connectors[geoparquet]",
+            )
         path = self._parse_source_ref(source_ref)
 
         if not path.exists():
@@ -386,15 +411,23 @@ class GeoParquetConnector:
             if geom_types and len(geom_types) > 0:
                 geom_type = _normalize_geometry_type(geom_types[0])
 
-        # Get CRS
+        # Get CRS — never silently default to EPSG:4326
         crs_str = _extract_crs_from_geo_metadata(geo_meta)
-        srid = _extract_srid_from_crs(crs_str) or 4326
-        crs = CRS.from_epsg(srid)
+        srid = _extract_srid_from_crs(crs_str)
+        if srid is not None:
+            crs = CRS.from_epsg(srid)
+        elif crs_str:
+            try:
+                crs = CRS.from_user_input(crs_str)
+            except (fiona.errors.CRSError, ValueError):
+                crs = None  # CRS present but unparseable — omit rather than guess
+        else:
+            crs = None
 
         # Prepare fiona schema
         fiona_schema = {"geometry": geom_type, "properties": properties}
 
-        # Compute extent while writing
+        # Compute extent while writing (vectorized per batch via shapely.total_bounds)
         xmin, ymin, xmax, ymax = float("inf"), float("inf"), float("-inf"), float("-inf")
         feature_count = 0
 
@@ -405,37 +438,33 @@ class GeoParquetConnector:
             schema=fiona_schema,
             crs=crs,
         ) as dst:
-            # Iterate through batches for memory efficiency
             for batch in table.to_batches():
-                # Get geometry column as WKB
                 geom_array = batch.column(geom_col)
                 wkb_values = geom_array.to_pylist()
+
+                # Decode all WKB in batch at once, skip nulls
+                valid_wkb = [w for w in wkb_values if w is not None]
+                if valid_wkb:
+                    geoms = shapely.io.from_wkb(valid_wkb)
+                    batch_bounds = shapely.total_bounds(geoms)
+                    xmin = min(xmin, batch_bounds[0])
+                    ymin = min(ymin, batch_bounds[1])
+                    xmax = max(xmax, batch_bounds[2])
+                    ymax = max(ymax, batch_bounds[3])
 
                 # Get property columns
                 prop_arrays = {name: batch.column(name).to_pylist() for name in col_names}
 
+                # Write features using pre-parsed geometries from the batch
+                geom_idx = 0
                 for i, wkb in enumerate(wkb_values):
                     if wkb is None:
                         continue
 
-                    # Decode WKB to shapely geometry
-                    geom = shapely.io.from_wkb(wkb)
+                    geom = geoms[geom_idx]
+                    geom_idx += 1
 
-                    # Update extent
-                    bounds = shapely.bounds(geom)
-                    if bounds[0] < xmin:
-                        xmin = bounds[0]
-                    if bounds[1] < ymin:
-                        ymin = bounds[1]
-                    if bounds[2] > xmax:
-                        xmax = bounds[2]
-                    if bounds[3] > ymax:
-                        ymax = bounds[3]
-
-                    # Build properties dict
                     props = {name: prop_arrays[name][i] for name in col_names}
-
-                    # Write feature
                     dst.write({"geometry": geom.__geo_interface__, "properties": props})
                     feature_count += 1
 

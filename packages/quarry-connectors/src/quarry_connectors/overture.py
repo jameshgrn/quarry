@@ -75,8 +75,24 @@ class OvertureConnector:
         release: str = _DEFAULT_RELEASE,
         max_rows: int = 10000,
     ):
+        self._validate_release(release)
         self._release = release
         self._max_rows = max_rows
+
+    @staticmethod
+    def _validate_release(release: str) -> None:
+        """Validate release string format to prevent SQL injection.
+
+        Release is interpolated into a read_parquet() S3 URL, so it must
+        match the expected YYYY-MM-DD.N pattern (e.g. '2024-12-18.0').
+        """
+        import re
+
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}\.\d+", release):
+            raise ValueError(
+                f"Invalid Overture release format: '{release}'. "
+                f"Expected YYYY-MM-DD.N (e.g. '2024-12-18.0')."
+            )
 
     @property
     def name(self) -> str:
@@ -157,13 +173,15 @@ class OvertureConnector:
             feature_count=row_count,
         )
 
+        file_size = output_path.stat().st_size
+
         artifact = Artifact(
             type=ArtifactType.VECTOR,
             name=f"{theme}_{typ}",
             backing=BackingStore(
                 kind=BackingStoreKind.LOCAL_FILE,
                 uri=str(output_path),
-                size_bytes=output_path.stat().st_size,
+                size_bytes=file_size,
                 content_hash=content_hash(output_path),
             ),
             spatial=spatial,
@@ -181,8 +199,7 @@ class OvertureConnector:
             artifact=artifact,
             strategy="fetched_remote",
             source_ref=source_ref,
-            notes=f"Dumped {output_path.name} ({row_count} features, "
-            f"{output_path.stat().st_size} bytes)",
+            notes=f"Dumped {output_path.name} ({row_count} features, {file_size} bytes)",
         )
 
     def discover(self, query: str | dict[str, Any] | None = None) -> list[CatalogEntry]:
@@ -364,20 +381,23 @@ class OvertureConnector:
                 self._setup_extensions(conn)
                 parquet_src = self._parquet_source(theme, typ)
 
-                # Build query with bbox filter and row limit
-                where_clauses = []
+                # Build query with parameterized bbox filter
+                bbox_params: list[float] = []
                 if bbox:
                     w, s, e, n = bbox
-                    where_clauses.append(
-                        f"bbox.xmin >= {w} AND bbox.xmax <= {e} "
-                        f"AND bbox.ymin >= {s} AND bbox.ymax <= {n}"
+                    where_sql = (
+                        " WHERE bbox.xmin >= $1 AND bbox.xmax <= $2"
+                        " AND bbox.ymin >= $3 AND bbox.ymax <= $4"
                     )
+                    bbox_params = [w, e, s, n]
+                else:
+                    where_sql = ""
 
-                where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
-                query = f"SELECT * FROM {parquet_src}{where_sql} LIMIT {self._max_rows}"
+                limit = int(self._max_rows)
+                query = f"SELECT * FROM {parquet_src}{where_sql} LIMIT {limit}"
 
                 # Introspect columns
-                desc = conn.execute(f"DESCRIBE ({query})").fetchall()
+                desc = conn.execute(f"DESCRIBE ({query})", bbox_params).fetchall()
                 columns = [{"name": row[0], "type": row[1]} for row in desc]
                 col_names = [c["name"] for c in columns]
 
@@ -389,7 +409,7 @@ class OvertureConnector:
                         "No 'geometry' column found in Overture data.",
                     )
 
-                # Build WKB fetch query
+                # Build WKB fetch query with parameterized bbox
                 non_geom_cols = [c for c in col_names if c != geom_col]
                 select_parts = [_quote_ident(c) for c in non_geom_cols]
                 select_parts.append(
@@ -397,10 +417,8 @@ class OvertureConnector:
                 )
                 select_sql = ", ".join(select_parts)
 
-                wkb_query = (
-                    f"SELECT {select_sql} FROM {parquet_src}{where_sql} LIMIT {self._max_rows}"
-                )
-                rows = conn.execute(wkb_query).fetchall()
+                wkb_query = f"SELECT {select_sql} FROM {parquet_src}{where_sql} LIMIT {limit}"
+                rows = conn.execute(wkb_query, bbox_params).fetchall()
 
             finally:
                 conn.close()
@@ -498,10 +516,10 @@ class OvertureConnector:
             conn.execute("INSTALL httpfs")
             conn.execute("LOAD httpfs")
             conn.execute("SET s3_region='us-west-2'")
-        except Exception:
+        except duckdb.Error:
             pass  # httpfs may already be loaded or unavailable for tests
         try:
             conn.execute("INSTALL spatial")
             conn.execute("LOAD spatial")
-        except Exception:
+        except duckdb.Error:
             pass  # spatial may already be loaded

@@ -18,8 +18,9 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlencode
 
+import rasterio
 import requests
 from quarry_core.artifact import (
     Artifact,
@@ -39,21 +40,6 @@ from quarry_core.connector import (
 
 if TYPE_CHECKING:
     from quarry_core.source_ref import SourceRef
-
-# Known OpenTopography global DEM datasets
-KNOWN_DATASETS = {
-    "SRTMGL3",
-    "SRTMGL1",
-    "SRTMGL1_E",
-    "AW3D30",
-    "AW3D30_E",
-    "SRTM15Plus",
-    "NASADEM",
-    "COP30",
-    "COP90",
-    "EU_DTM",
-    "GEDI_L3",
-}
 
 # Dataset metadata for discover/metadata
 _DATASET_INFO: dict[str, dict[str, Any]] = {
@@ -81,6 +67,9 @@ _DATASET_INFO: dict[str, dict[str, Any]] = {
     "EU_DTM": {"description": "European DTM 30m", "resolution": 30, "coverage": "Europe"},
     "GEDI_L3": {"description": "GEDI L3 1km DTM", "resolution": 1000, "coverage": "52S-52N"},
 }
+
+# Derived from _DATASET_INFO — single source of truth
+KNOWN_DATASETS = set(_DATASET_INFO.keys())
 
 # Global bbox for spatial hints
 _GLOBAL_EXTENT = (-180.0, -90.0, 180.0, 90.0)
@@ -187,8 +176,10 @@ class OpenTopographyConnector:
         resolution = ds_info.get("resolution")
 
         if lazy:
-            # Lazy mode: construct API URL but don't fetch
-            api_url = self._build_api_url(dataset_id, west, south, east, north)
+            # Lazy mode: build a credential-free URI for the handle.
+            # Never embed API_Key in artifact URIs — it leaks into
+            # logs, lineage, and any serialization of the artifact.
+            public_url = self._build_public_url(dataset_id, west, south, east, north)
 
             # Estimate resolution in degrees (rough approximation)
             res_degrees = None
@@ -208,7 +199,7 @@ class OpenTopographyConnector:
                 name=f"{dataset_id}_{west}_{south}_{east}_{north}",
                 backing=BackingStore(
                     kind=BackingStoreKind.LAZY_HANDLE,
-                    uri=api_url,
+                    uri=public_url,
                 ),
                 spatial=spatial,
                 lineage=Lineage(operation="materialize", params=lineage_params),
@@ -420,10 +411,24 @@ class OpenTopographyConnector:
     # Private: API interaction
     # -----------------------------------------------------------------------
 
+    def _build_public_url(
+        self, dataset_id: str, west: float, south: float, east: float, north: float
+    ) -> str:
+        """Build credential-free API URL for artifact URIs and logging."""
+        params = {
+            "demtype": dataset_id,
+            "south": south,
+            "north": north,
+            "west": west,
+            "east": east,
+            "outputFormat": "GTiff",
+        }
+        return f"{self._api_url}?{urlencode(params)}"
+
     def _build_api_url(
         self, dataset_id: str, west: float, south: float, east: float, north: float
     ) -> str:
-        """Build OpenTopography API URL for DEM request."""
+        """Build authenticated API URL for actual requests (never stored in artifacts)."""
         params = {
             "demtype": dataset_id,
             "south": south,
@@ -435,8 +440,7 @@ class OpenTopographyConnector:
         if self._api_key:
             params["API_Key"] = self._api_key
 
-        query = "&".join(f"{k}={v}" for k, v in params.items())
-        return f"{self._api_url}?{query}"
+        return f"{self._api_url}?{urlencode(params)}"
 
     def _download_dem(
         self,
@@ -464,15 +468,18 @@ class OpenTopographyConnector:
         except requests.HTTPError as e:
             if download_path.exists():
                 download_path.unlink()
+            # Use credential-free URL in errors to avoid leaking API key
+            public_url = self._build_public_url(dataset_id, west, south, east, north)
             raise MaterializeError(
-                api_url,
+                public_url,
                 f"OpenTopography API error: {e.response.status_code} - {e.response.text[:200]}",
             ) from e
         except Exception as e:
             if download_path.exists():
                 download_path.unlink()
+            public_url = self._build_public_url(dataset_id, west, south, east, north)
             raise MaterializeError(
-                api_url,
+                public_url,
                 f"Download failed: {e}",
             ) from e
 
@@ -481,8 +488,6 @@ class OpenTopographyConnector:
     def _read_spatial_metadata(self, path: Path) -> SpatialDescriptor:
         """Read spatial metadata from downloaded GeoTIFF."""
         try:
-            import rasterio
-
             with rasterio.open(path) as src:
                 crs = src.crs.to_string() if src.crs else "EPSG:4326"
                 bounds = src.bounds

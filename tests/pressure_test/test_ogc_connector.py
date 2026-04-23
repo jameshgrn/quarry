@@ -229,21 +229,20 @@ class TestOGCWMSMaterialization:
 
     @pytest.mark.skipif(not HAS_OWSLIB, reason="owslib not installed")
     def test_wms_eager_materialization(self, connector, workspace, mock_wms_capabilities):
-        """Eager WMS materialization downloads raster image."""
-        # Mock the requests.get call for GetMap
-        mock_response = MagicMock()
-        mock_response.iter_content = MagicMock(return_value=[b"fake image data"])
-        mock_response.raise_for_status = MagicMock()
+        """Eager WMS materialization downloads raster image via owslib getmap()."""
+        # Mock owslib's getmap() response (returns file-like object with .read())
+        mock_getmap_resp = MagicMock()
+        mock_getmap_resp.read = MagicMock(return_value=b"fake image data")
+        mock_wms_capabilities.getmap = MagicMock(return_value=mock_getmap_resp)
 
         with patch(
             "quarry_connectors.ogc_services.WebMapService", return_value=mock_wms_capabilities
         ):
-            with patch("quarry_connectors.ogc_services.requests.get", return_value=mock_response):
-                result = connector.materialize(
-                    "wms::https://example.com/wms::test_layer",
-                    workspace,
-                    lazy=False,
-                )
+            result = connector.materialize(
+                "wms::https://example.com/wms::test_layer",
+                workspace,
+                lazy=False,
+            )
 
         assert result.artifact.type == ArtifactType.RASTER
         assert result.artifact.backing.kind == BackingStoreKind.LOCAL_FILE

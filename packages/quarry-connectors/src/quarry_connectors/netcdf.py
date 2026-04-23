@@ -367,8 +367,8 @@ class NetCDFConnector:
                     if variables:
                         global_attrs = {attr: getattr(ds, attr) for attr in ds.ncattrs()}
                         variables[0]["global_attributes"] = global_attrs
-            except Exception:
-                # Fall back to rasterio subdatasets
+            except OSError:
+                # netCDF4 can't read the file — fall back to rasterio subdatasets
                 pass
 
         if not variables:
@@ -387,8 +387,8 @@ class NetCDFConnector:
                                 var_info["dtype"] = (
                                     str(var_src.dtypes[0]) if var_src.dtypes else None
                                 )
-                        except Exception:
-                            pass
+                        except rasterio.errors.RasterioIOError:
+                            pass  # subdataset may not be openable as raster
                         variables.append(var_info)
             except Exception as e:
                 raise MaterializeError(path, f"Failed to list variables: {e}") from e
@@ -440,8 +440,8 @@ class NetCDFConnector:
                             "global_attributes": {attr: getattr(ds, attr) for attr in ds.ncattrs()},
                         }
                         return result
-            except Exception:
-                pass
+            except OSError:
+                pass  # netCDF4 can't open — fall through to rasterio
 
         # Fallback: basic info from rasterio
         subdataset_uri = _build_subdataset_uri(path, variable, fmt)
@@ -452,7 +452,7 @@ class NetCDFConnector:
                     "band_count": src.count,
                     "dtype": str(src.dtypes[0]) if src.dtypes else None,
                 }
-        except Exception:
+        except rasterio.errors.RasterioIOError:
             return {}
 
     # -----------------------------------------------------------------------

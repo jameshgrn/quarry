@@ -21,15 +21,15 @@ Design decisions:
 
 from __future__ import annotations
 
-import os
 import shutil
 from contextlib import contextmanager
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import urlparse
 
 import rasterio
+import rasterio.env
 from quarry_core.artifact import (
     Artifact,
     ArtifactType,
@@ -48,30 +48,23 @@ from quarry_core.connector import (
 if TYPE_CHECKING:
     from quarry_core.source_ref import SourceRef
 
-# File extension to artifact type mapping
-RASTER_EXTENSIONS = {
-    ".tif",
-    ".tiff",
-    ".geotiff",
-    ".jp2",
-    ".hgt",
-    ".nc",
-    ".vrt",
-    ".h5",
-    ".hdf5",
-    ".hdf",
-}
-VECTOR_EXTENSIONS = {
-    ".shp",
-    ".geojson",
-    ".gpkg",
-    ".kml",
-    ".gml",
-    ".fgb",
-    ".parquet",
-    ".geoparquet",
-}
+# Import canonical extension sets from quarry-core (single source of truth)
+from quarry_core.source_ref import RASTER_EXTENSIONS, VECTOR_EXTENSIONS
+
 TABLE_EXTENSIONS = {".csv"}
+
+# Lookup tables — data over procedure (clanker rule 4)
+_EXT_TO_FILE_TYPE: dict[str, Literal["raster", "vector", "table"]] = {
+    **{ext: "raster" for ext in RASTER_EXTENSIONS},
+    **{ext: "vector" for ext in VECTOR_EXTENSIONS},
+    **{ext: "table" for ext in TABLE_EXTENSIONS},
+}
+
+_FILE_TYPE_TO_ARTIFACT: dict[str, ArtifactType] = {
+    "raster": ArtifactType.RASTER,
+    "vector": ArtifactType.VECTOR,
+    "table": ArtifactType.TABLE,
+}
 
 
 @dataclass(frozen=True)
@@ -133,7 +126,8 @@ class ObjectStoreConnector:
         parsed = self._parse_source_ref(source_ref)
         file_type = self._detect_file_type(parsed.path)
 
-        # Set up auth env vars if credentials provided
+        # Auth context wraps both inspect and download — GDAL env vars must
+        # remain set for credentialed cloud I/O in both phases.
         with self._auth_context():
             try:
                 spatial, driver, size_bytes = self._inspect(parsed, file_type)
@@ -142,64 +136,73 @@ class ObjectStoreConnector:
             except Exception as e:
                 raise MaterializeError(source_ref, f"Failed to inspect: {e}") from e
 
-        lineage_params: dict[str, Any] = {
-            "source": "object_store",
-            "scheme": parsed.scheme,
-            "vsi_path": parsed.vsi_path,
-            "lazy": lazy,
-            "file_type": file_type,
-            "original_path": parsed.path,
-        }
-        if parsed.bucket:
-            lineage_params["bucket"] = parsed.bucket
+            lineage_params: dict[str, Any] = {
+                "source": "object_store",
+                "scheme": parsed.scheme,
+                "vsi_path": parsed.vsi_path,
+                "lazy": lazy,
+                "file_type": file_type,
+                "original_path": parsed.path,
+            }
+            if parsed.bucket:
+                lineage_params["bucket"] = parsed.bucket
 
-        if lazy:
-            artifact = self._build_lazy_artifact(parsed, file_type, spatial, driver, lineage_params)
-            return MaterializeResult(
-                artifact=artifact,
-                strategy="lazy_handle",
-                source_ref=source_ref,
-                notes=f"Lazy handle for {parsed.scheme}://{parsed.bucket}/{parsed.path}"
-                if parsed.bucket
-                else f"Lazy handle for {parsed.scheme}://{parsed.path}",
+            if lazy:
+                artifact = self._build_lazy_artifact(
+                    parsed, file_type, spatial, driver, lineage_params
+                )
+                return MaterializeResult(
+                    artifact=artifact,
+                    strategy="lazy_handle",
+                    source_ref=source_ref,
+                    notes=f"Lazy handle for {parsed.scheme}://{parsed.bucket}/{parsed.path}"
+                    if parsed.bucket
+                    else f"Lazy handle for {parsed.scheme}://{parsed.path}",
+                )
+
+            # Eager: download to workspace
+            try:
+                local_path = self._download(parsed, file_type, workspace)
+            except MaterializeError:
+                raise
+            except Exception as e:
+                raise MaterializeError(source_ref, f"Download failed: {e}") from e
+
+            file_size = local_path.stat().st_size
+            lineage_params["data_transferred"] = file_size
+
+            # Local files are wrapped, remote files are fetched
+            # parsed.scheme defaults to "file" for local paths (see _parse_source_ref)
+            is_local = parsed.scheme == "file"
+            strategy = "wrapped_local" if is_local else "fetched_remote"
+
+            artifact = Artifact(
+                type=self._file_type_to_artifact_type(file_type),
+                name=self._derive_name(parsed.path),
+                backing=BackingStore(
+                    kind=BackingStoreKind.LOCAL_FILE,
+                    uri=str(local_path),
+                    size_bytes=file_size,
+                    content_hash=content_hash(local_path),
+                ),
+                spatial=spatial,
+                lineage=Lineage(operation="materialize", params=lineage_params),
+                metadata={
+                    "source_scheme": parsed.scheme,
+                    "source_bucket": parsed.bucket,
+                    "source_path": parsed.path,
+                    "driver": driver,
+                    "file_type": file_type,
+                },
             )
 
-        # Eager: download to workspace
-        try:
-            local_path = self._download(parsed, file_type, workspace)
-        except MaterializeError:
-            raise
-        except Exception as e:
-            raise MaterializeError(source_ref, f"Download failed: {e}") from e
-
-        lineage_params["data_transferred"] = local_path.stat().st_size
-
-        artifact = Artifact(
-            type=self._file_type_to_artifact_type(file_type),
-            name=self._derive_name(parsed.path),
-            backing=BackingStore(
-                kind=BackingStoreKind.LOCAL_FILE,
-                uri=str(local_path),
-                size_bytes=local_path.stat().st_size,
-                content_hash=content_hash(local_path),
-            ),
-            spatial=spatial,
-            lineage=Lineage(operation="materialize", params=lineage_params),
-            metadata={
-                "source_scheme": parsed.scheme,
-                "source_bucket": parsed.bucket,
-                "source_path": parsed.path,
-                "driver": driver,
-                "file_type": file_type,
-            },
-        )
-
-        return MaterializeResult(
-            artifact=artifact,
-            strategy="fetched_remote",
-            source_ref=source_ref,
-            notes=f"Downloaded {local_path.name} ({local_path.stat().st_size} bytes)",
-        )
+            return MaterializeResult(
+                artifact=artifact,
+                strategy=strategy,
+                source_ref=source_ref,
+                notes=f"{'Wrapped' if is_local else 'Downloaded'} "
+                f"{local_path.name} ({file_size} bytes)",
+            )
 
     def metadata(self, source_ref: SourceRef | str) -> dict[str, Any]:
         """Get metadata about a cloud object without materializing."""
@@ -314,26 +317,14 @@ class ObjectStoreConnector:
     @staticmethod
     def _detect_file_type(path: str) -> Literal["raster", "vector", "table", "unknown"]:
         """Detect file type from extension."""
-        lower = path.lower()
-        for ext in RASTER_EXTENSIONS:
-            if lower.endswith(ext):
-                return "raster"
-        for ext in VECTOR_EXTENSIONS:
-            if lower.endswith(ext):
-                return "vector"
-        for ext in TABLE_EXTENSIONS:
-            if lower.endswith(ext):
-                return "table"
-        return "unknown"
+
+        ext = PurePosixPath(path.lower()).suffix
+        return _EXT_TO_FILE_TYPE.get(ext, "unknown")
 
     @staticmethod
     def _file_type_to_artifact_type(file_type: str) -> ArtifactType:
         """Map file type to artifact type."""
-        if file_type == "raster":
-            return ArtifactType.RASTER
-        if file_type == "vector":
-            return ArtifactType.VECTOR
-        return ArtifactType.TABLE
+        return _FILE_TYPE_TO_ARTIFACT.get(file_type, ArtifactType.TABLE)
 
     # -----------------------------------------------------------------------
     # Inspection (metadata extraction)
@@ -458,11 +449,13 @@ class ObjectStoreConnector:
         return output_path
 
     def _download_vector(self, parsed: ParsedSourceRef, output_path: Path) -> Path:
-        """Download vector using fiona to read and write locally."""
+        """Download vector using fiona to read and write locally as GeoPackage."""
         import fiona
 
+        # Always write GPKG — ensure extension matches the actual format
+        output_path = output_path.with_suffix(".gpkg")
+
         with fiona.open(parsed.vsi_path) as src:
-            # Copy to local GeoPackage
             schema = src.schema
             crs = src.crs
 
@@ -531,38 +524,68 @@ class ObjectStoreConnector:
 
     @contextmanager
     def _auth_context(self):
-        """Context manager to set GDAL auth env vars from credentials."""
+        """Context manager to set GDAL auth env vars from credentials.
+
+        Uses rasterio.Env with AWSSession when boto3 is available,
+        falls back to os.environ manipulation otherwise.
+
+        Note: the os.environ fallback is not thread-safe. Concurrent
+        connector instances with different credentials may race.
+        """
         if not self._credentials:
             yield
             return
 
-        # Save original env vars
-        orig_env = {}
-        env_vars = {
-            # AWS
-            "AWS_ACCESS_KEY_ID": self._credentials.get("aws_access_key_id"),
-            "AWS_SECRET_ACCESS_KEY": self._credentials.get("aws_secret_access_key"),
+        # Try rasterio.Env with AWSSession for thread-safe AWS auth
+        aws_key = self._credentials.get("aws_access_key_id")
+        aws_secret = self._credentials.get("aws_secret_access_key")
+
+        # Non-AWS provider config (GCS, Azure) as GDAL options
+        gdal_config: dict[str, str] = {}
+        if self._credentials.get("gcs_credentials"):
+            gdal_config["GOOGLE_APPLICATION_CREDENTIALS"] = self._credentials["gcs_credentials"]
+        if self._credentials.get("azure_storage_account"):
+            gdal_config["AZURE_STORAGE_ACCOUNT"] = self._credentials["azure_storage_account"]
+        if self._credentials.get("azure_storage_key"):
+            gdal_config["AZURE_STORAGE_KEY"] = self._credentials["azure_storage_key"]
+
+        if aws_key and aws_secret:
+            try:
+                from rasterio.session import AWSSession
+
+                session = AWSSession(
+                    aws_access_key_id=aws_key,
+                    aws_secret_access_key=aws_secret,
+                    region_name=self._credentials.get("region"),
+                )
+                with rasterio.env.Env(session=session, **gdal_config):
+                    yield
+                return
+            except (ImportError, AttributeError):
+                pass  # boto3 not installed — fall through to os.environ
+
+        # Fallback: set env vars directly (not thread-safe)
+        import os
+
+        env_map = {
+            "AWS_ACCESS_KEY_ID": aws_key,
+            "AWS_SECRET_ACCESS_KEY": aws_secret,
             "AWS_REGION": self._credentials.get("region"),
             "AWS_DEFAULT_REGION": self._credentials.get("region"),
-            # GCS
-            "GOOGLE_APPLICATION_CREDENTIALS": self._credentials.get("gcs_credentials"),
-            # Azure
-            "AZURE_STORAGE_ACCOUNT": self._credentials.get("azure_storage_account"),
-            "AZURE_STORAGE_KEY": self._credentials.get("azure_storage_key"),
+            **{k: v for k, v in gdal_config.items()},
         }
 
-        # Set new values
-        for key, value in env_vars.items():
+        saved = {}
+        for key, value in env_map.items():
             if value:
-                orig_env[key] = os.environ.get(key)
+                saved[key] = os.environ.get(key)
                 os.environ[key] = value
 
         try:
             yield
         finally:
-            # Restore original values
-            for key, orig_value in orig_env.items():
-                if orig_value is None:
+            for key, orig in saved.items():
+                if orig is None:
                     os.environ.pop(key, None)
                 else:
-                    os.environ[key] = orig_value
+                    os.environ[key] = orig

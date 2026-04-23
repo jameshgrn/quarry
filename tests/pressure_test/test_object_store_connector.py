@@ -280,7 +280,7 @@ class TestObjectStoreLocalFallback:
 
         assert result.artifact.type == ArtifactType.RASTER
         assert result.artifact.backing.kind == BackingStoreKind.LOCAL_FILE
-        assert result.strategy == "fetched_remote"
+        assert result.strategy == "wrapped_local"
 
     def test_local_geotiff_lazy_materialization(self, connector, sample_geotiff, tmp_path):
         """Materialize a local GeoTIFF file lazily."""

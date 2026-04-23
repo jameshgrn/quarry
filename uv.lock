@@ -13,7 +13,7 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "2026-04-16T08:39:39.856879Z"
+exclude-newer = "2026-04-16T09:20:56.507093Z"
 exclude-newer-span = "P7D"
 
 [manifest]
@@ -30,6 +30,7 @@ dev = [
     { name = "matplotlib", specifier = ">=3.10.8" },
     { name = "netcdf4", specifier = ">=1.7.3" },
     { name = "pillow", specifier = ">=12.2.0" },
+    { name = "pyarrow", specifier = ">=14.0.0" },
     { name = "pytest", specifier = ">=7.0.0" },
     { name = "pytz", specifier = ">=2024.1" },
 ]
@@ -2008,7 +2009,6 @@ dependencies = [
     { name = "duckdb" },
     { name = "fiona" },
     { name = "psycopg", extra = ["binary"] },
-    { name = "pyarrow" },
     { name = "pystac-client" },
     { name = "quarry-core" },
     { name = "rasterio", version = "1.4.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
@@ -2025,12 +2025,16 @@ all-connectors = [
     { name = "netcdf4", version = "1.7.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11' and platform_machine == 'ARM64' and sys_platform == 'win32'" },
     { name = "netcdf4", version = "1.7.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11' or platform_machine != 'ARM64' or sys_platform != 'win32'" },
     { name = "owslib" },
+    { name = "pyarrow" },
 ]
 dev = [
     { name = "pytest" },
 ]
 gcs = [
     { name = "google-cloud-storage" },
+]
+geoparquet = [
+    { name = "pyarrow" },
 ]
 hdf5 = [
     { name = "h5py" },
@@ -2061,7 +2065,8 @@ requires-dist = [
     { name = "owslib", marker = "extra == 'all-connectors'", specifier = ">=0.29.0" },
     { name = "owslib", marker = "extra == 'ogc'", specifier = ">=0.29.0" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.1.0" },
-    { name = "pyarrow", specifier = ">=14.0.0" },
+    { name = "pyarrow", marker = "extra == 'all-connectors'", specifier = ">=14.0.0" },
+    { name = "pyarrow", marker = "extra == 'geoparquet'", specifier = ">=14.0.0" },
     { name = "pystac-client", specifier = ">=0.7.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0.0" },
     { name = "quarry-core", editable = "packages/quarry-core" },
@@ -2069,7 +2074,7 @@ requires-dist = [
     { name = "requests", specifier = ">=2.28.0" },
     { name = "shapely", specifier = ">=2.0.0" },
 ]
-provides-extras = ["ogc", "netcdf", "hdf5", "s3", "gcs", "all-connectors", "dev"]
+provides-extras = ["geoparquet", "ogc", "netcdf", "hdf5", "s3", "gcs", "all-connectors", "dev"]
 
 [[package]]
 name = "quarry-core"

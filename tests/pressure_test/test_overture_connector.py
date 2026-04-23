@@ -31,13 +31,16 @@ from quarry_core.source_ref import SourceRef
 
 @pytest.fixture()
 def mock_overture_db(tmp_path):
-    """Create a DuckDB file with tables mimicking Overture schema."""
-    db_path = str(tmp_path / "overture_mock.duckdb")
-    conn = duckdb.connect(db_path)
+    """Create a local Parquet file mimicking Overture schema.
+
+    Exports DuckDB table data to Parquet so the real _fetch_and_dump
+    can read it via read_parquet() in an in-memory DuckDB connection.
+    """
+    conn = duckdb.connect(":memory:")
     try:
         conn.execute("INSTALL spatial")
         conn.execute("LOAD spatial")
-    except Exception:
+    except duckdb.Error:
         conn.close()
         pytest.skip("DuckDB spatial extension not available")
 
@@ -58,118 +61,40 @@ def mock_overture_db(tmp_path):
         ('b3', 'Building C', ST_Point(5.0, 6.0),
          {xmin: 4.9, ymin: 5.9, xmax: 5.1, ymax: 6.1})
     """)
+    parquet_path = str(tmp_path / "mock_buildings.parquet")
+    # Export geometry as WKB BLOB to match real Overture Parquet layout
+    conn.execute(
+        f"COPY (SELECT id, names, ST_AsWKB(geometry) AS geometry, bbox "
+        f"FROM mock_buildings) TO '{parquet_path}' (FORMAT PARQUET)"
+    )
     conn.close()
-    return db_path
+    return parquet_path
 
 
 class _LocalOvertureConnector(OvertureConnector):
-    """Test subclass that reads from a local DuckDB table instead of S3."""
+    """Test subclass that reads from a local Parquet file instead of S3.
 
-    def __init__(self, db_path: str, table: str, **kwargs):
+    Only overrides _parquet_source (for data injection) and _setup_extensions
+    (to skip httpfs). The real _fetch_and_dump runs against the local data,
+    so the test exercises actual production logic.
+    """
+
+    def __init__(self, parquet_path: str, **kwargs):
         super().__init__(**kwargs)
-        self._local_db_path = db_path
-        self._local_table = table
+        self._local_parquet_path = parquet_path
 
     def _parquet_source(self, theme: str, typ: str) -> str:
-        """Override to point at local DuckDB table."""
-        return f"'{self._local_db_path}'.__main__.{self._local_table}"
+        """Override to read from local Parquet file."""
+        return f"read_parquet('{self._local_parquet_path}')"
 
-    def _fetch_and_dump(self, theme, typ, bbox, workspace, source_ref):
-        """Override to query local DuckDB directly instead of remote parquet."""
-        import fiona
-        import shapely.wkb
-        from fiona.crs import CRS
-        from quarry_core.connector import MaterializeError
-
+    @staticmethod
+    def _setup_extensions(conn: duckdb.DuckDBPyConnection) -> None:
+        """Only load spatial — skip httpfs since we're reading local data."""
         try:
-            conn = duckdb.connect(self._local_db_path, read_only=True)
-            try:
-                conn.execute("LOAD spatial")
-                table = self._local_table
-
-                where_clauses = []
-                if bbox:
-                    w, s, e, n = bbox
-                    where_clauses.append(
-                        f"bbox.xmin >= {w} AND bbox.xmax <= {e} "
-                        f"AND bbox.ymin >= {s} AND bbox.ymax <= {n}"
-                    )
-                where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
-
-                query = f"SELECT * FROM {table}{where_sql} LIMIT {self._max_rows}"
-                desc = conn.execute(f"DESCRIBE ({query})").fetchall()
-                columns = [{"name": row[0], "type": row[1]} for row in desc]
-                col_names = [c["name"] for c in columns]
-
-                geom_col = "geometry"
-                non_geom_cols = [c for c in col_names if c != geom_col]
-                select_parts = [f'"{c}"' for c in non_geom_cols]
-                select_parts.append(f'ST_AsWKB("{geom_col}") AS _geom_wkb')
-
-                wkb_query = (
-                    f"SELECT {', '.join(select_parts)} FROM {table}{where_sql} "
-                    f"LIMIT {self._max_rows}"
-                )
-                rows = conn.execute(wkb_query).fetchall()
-            finally:
-                conn.close()
-        except MaterializeError:
-            raise
-        except Exception as e:
-            raise MaterializeError(source_ref, f"DuckDB query failed: {e}") from e
-
-        if not rows:
-            raise MaterializeError(
-                source_ref,
-                f"No features returned for {theme}/{typ}"
-                + (f" within bbox {bbox}" if bbox else ""),
-            )
-
-        properties = {}
-        for col in columns:
-            if col["name"] == geom_col:
-                continue
-            properties[col["name"]] = "str"
-
-        output_path = workspace / f"{theme}_{typ}.gpkg"
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-
-        fiona_schema = {"geometry": "Point", "properties": properties}
-        crs = CRS.from_epsg(4326)
-
-        xmin_acc = float("inf")
-        ymin_acc = float("inf")
-        xmax_acc = float("-inf")
-        ymax_acc = float("-inf")
-        written = 0
-
-        with fiona.open(output_path, "w", driver="GPKG", schema=fiona_schema, crs=crs) as dst:
-            for row in rows:
-                geom_wkb = row[-1]
-                if geom_wkb is None:
-                    continue
-                geom = shapely.wkb.loads(
-                    bytes(geom_wkb) if not isinstance(geom_wkb, bytes) else geom_wkb
-                )
-                bounds = geom.bounds
-                xmin_acc = min(xmin_acc, bounds[0])
-                ymin_acc = min(ymin_acc, bounds[1])
-                xmax_acc = max(xmax_acc, bounds[2])
-                ymax_acc = max(ymax_acc, bounds[3])
-
-                props = {}
-                for col in columns:
-                    if col["name"] == geom_col:
-                        continue
-                    col_idx = non_geom_cols.index(col["name"])
-                    val = row[col_idx]
-                    props[col["name"]] = str(val) if val is not None else None
-
-                dst.write({"geometry": geom.__geo_interface__, "properties": props})
-                written += 1
-
-        extent = (xmin_acc, ymin_acc, xmax_acc, ymax_acc) if written > 0 else None
-        return output_path, written, extent
+            conn.execute("INSTALL spatial")
+            conn.execute("LOAD spatial")
+        except duckdb.Error:
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -302,28 +227,28 @@ class TestOvertureEagerMaterialization:
     """Validate eager materialization using local DuckDB mock data."""
 
     def test_eager_produces_vector_artifact(self, mock_overture_db, tmp_path):
-        connector = _LocalOvertureConnector(mock_overture_db, "mock_buildings")
+        connector = _LocalOvertureConnector(mock_overture_db)
         result = connector.materialize("overture://buildings/building", tmp_path, lazy=False)
         assert result.artifact.type == ArtifactType.VECTOR
         assert result.artifact.backing.kind == BackingStoreKind.LOCAL_FILE
 
     def test_eager_strategy_fetched_remote(self, mock_overture_db, tmp_path):
-        connector = _LocalOvertureConnector(mock_overture_db, "mock_buildings")
+        connector = _LocalOvertureConnector(mock_overture_db)
         result = connector.materialize("overture://buildings/building", tmp_path, lazy=False)
         assert result.strategy == "fetched_remote"
 
     def test_eager_produces_gpkg(self, mock_overture_db, tmp_path):
-        connector = _LocalOvertureConnector(mock_overture_db, "mock_buildings")
+        connector = _LocalOvertureConnector(mock_overture_db)
         result = connector.materialize("overture://buildings/building", tmp_path, lazy=False)
         assert result.artifact.backing.uri.endswith(".gpkg")
 
     def test_eager_feature_count(self, mock_overture_db, tmp_path):
-        connector = _LocalOvertureConnector(mock_overture_db, "mock_buildings")
+        connector = _LocalOvertureConnector(mock_overture_db)
         result = connector.materialize("overture://buildings/building", tmp_path, lazy=False)
         assert result.artifact.spatial.feature_count == 3
 
     def test_eager_extent(self, mock_overture_db, tmp_path):
-        connector = _LocalOvertureConnector(mock_overture_db, "mock_buildings")
+        connector = _LocalOvertureConnector(mock_overture_db)
         result = connector.materialize("overture://buildings/building", tmp_path, lazy=False)
         extent = result.artifact.spatial.extent
         assert extent is not None
@@ -334,7 +259,7 @@ class TestOvertureEagerMaterialization:
         assert ymax == pytest.approx(6.0)
 
     def test_eager_content_hash_present(self, mock_overture_db, tmp_path):
-        connector = _LocalOvertureConnector(mock_overture_db, "mock_buildings")
+        connector = _LocalOvertureConnector(mock_overture_db)
         result = connector.materialize("overture://buildings/building", tmp_path, lazy=False)
         assert result.artifact.backing.content_hash is not None
         assert len(result.artifact.backing.content_hash) == 64
@@ -342,14 +267,14 @@ class TestOvertureEagerMaterialization:
     def test_eager_gpkg_readable_by_fiona(self, mock_overture_db, tmp_path):
         import fiona
 
-        connector = _LocalOvertureConnector(mock_overture_db, "mock_buildings")
+        connector = _LocalOvertureConnector(mock_overture_db)
         result = connector.materialize("overture://buildings/building", tmp_path, lazy=False)
         with fiona.open(result.artifact.backing.uri) as src:
             features = list(src)
         assert len(features) == 3
 
     def test_eager_lineage_params(self, mock_overture_db, tmp_path):
-        connector = _LocalOvertureConnector(mock_overture_db, "mock_buildings")
+        connector = _LocalOvertureConnector(mock_overture_db)
         result = connector.materialize("overture://buildings/building", tmp_path, lazy=False)
         params = result.artifact.lineage.params
         assert params["source"] == "overture"
@@ -358,7 +283,7 @@ class TestOvertureEagerMaterialization:
         assert params["lazy"] is False
 
     def test_eager_with_bbox_filter(self, mock_overture_db, tmp_path):
-        connector = _LocalOvertureConnector(mock_overture_db, "mock_buildings")
+        connector = _LocalOvertureConnector(mock_overture_db)
         ref = SourceRef(
             raw="overture://buildings/building",
             params={
@@ -372,7 +297,7 @@ class TestOvertureEagerMaterialization:
         assert result.artifact.spatial.feature_count == 1
 
     def test_eager_max_rows_limit(self, mock_overture_db, tmp_path):
-        connector = _LocalOvertureConnector(mock_overture_db, "mock_buildings", max_rows=2)
+        connector = _LocalOvertureConnector(mock_overture_db, max_rows=2)
         result = connector.materialize("overture://buildings/building", tmp_path, lazy=False)
         assert result.artifact.spatial.feature_count <= 2
 

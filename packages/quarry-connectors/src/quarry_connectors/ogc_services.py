@@ -13,10 +13,9 @@ Source ref formats:
 Or via SourceRef with params: {"service": "wms"|"wfs", "url": str, "layer": str}
 
 Design decisions:
-- Uses owslib for GetCapabilities parsing (optional dependency)
-- Uses requests for actual data fetching (GetMap, GetFeature)
-- WMS eager: downloads raster image, prefers GeoTIFF, falls back to PNG
-- WFS eager: downloads GeoJSON, converts to GeoPackage via fiona
+- Uses owslib for all OGC protocol interactions (optional dependency)
+- WMS eager: owslib getmap() for correct axis ordering, prefers GeoTIFF
+- WFS eager: owslib getfeature() → GeoJSON → GeoPackage via fiona
 - Lazy mode: GetCapabilities only, produces LAZY_HANDLE artifact with metadata
 - Spatial descriptor extracted from layer capabilities (CRS, bbox)
 """
@@ -25,9 +24,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urlencode
 
-import requests
 from quarry_core.artifact import (
     Artifact,
     ArtifactType,
@@ -177,6 +174,7 @@ class OGCServicesConnector:
 
         if not url:
             raise MaterializeError("discover", "No service URL specified")
+        self._validate_url(url)
         if not service_type:
             raise MaterializeError("discover", "No service type specified (wms or wfs)")
 
@@ -249,6 +247,7 @@ class OGCServicesConnector:
                     "SourceRef missing required params: service, url, layer",
                 )
 
+            self._validate_url(url)
             return (service_type.lower(), url, layer_name, extra_params)
 
         # Parse raw string format: "wms::https://example.com/wms::layer_name"
@@ -270,6 +269,8 @@ class OGCServicesConnector:
         service_type = parts[0].lower()
         url = parts[1]
         layer_name = parts[2]
+
+        self._validate_url(url)
 
         # Any additional parts are extra params (not expected)
         extra_params: dict[str, Any] = {}
@@ -421,7 +422,11 @@ class OGCServicesConnector:
         params: dict[str, Any],
         workspace: Path,
     ) -> Path:
-        """Download a WMS map via GetMap request."""
+        """Download a WMS map via owslib's getmap().
+
+        Uses owslib instead of manual URL construction so that WMS 1.3.0
+        BBOX axis ordering (lat/lon for EPSG:4326) is handled correctly.
+        """
         # Determine format
         format_override = params.get("format")
         if format_override:
@@ -456,38 +461,17 @@ class OGCServicesConnector:
         # Determine SRS
         srs = params.get("srs") or params.get("crs") or crs
 
-        # Build GetMap URL
-        getmap_url = (
-            wms.getOperationByName("GetMap").methods[0]["url"]
-            if hasattr(wms, "getOperationByName")
-            else wms.url
-        )
-
-        request_params = {
-            "SERVICE": "WMS",
-            "REQUEST": "GetMap",
-            "VERSION": wms.version,
-            "LAYERS": layer_name,
-            "STYLES": "",
-            "CRS" if wms.version >= "1.3.0" else "SRS": srs,
-            "BBOX": ",".join(str(x) for x in bbox),
-            "WIDTH": width,
-            "HEIGHT": height,
-            "FORMAT": img_format,
-            "TRANSPARENT": "TRUE",
-        }
-
-        url = f"{getmap_url}?{urlencode(request_params)}"
-
-        # Download
+        # Use owslib's getmap() — it handles WMS version-specific BBOX axis
+        # ordering (WMS 1.3.0 flips lat/lon for EPSG:4326)
         try:
-            resp = requests.get(
-                url,
-                stream=True,
-                timeout=120,
-                auth=(self._auth["username"], self._auth["password"]) if self._auth else None,
+            resp = wms.getmap(
+                layers=[layer_name],
+                srs=srs,
+                bbox=bbox,
+                size=(width, height),
+                format=img_format,
+                transparent=True,
             )
-            resp.raise_for_status()
         except Exception as e:
             raise MaterializeError(layer_name, f"WMS GetMap failed: {e}") from e
 
@@ -500,12 +484,12 @@ class OGCServicesConnector:
         elif "tiff" in img_format.lower():
             ext = ".tif"
 
-        output_path = workspace / f"{layer_name}{ext}"
+        safe_name = self._sanitize_layer_name(layer_name)
+        output_path = workspace / f"{safe_name}{ext}"
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
         with open(output_path, "wb") as f:
-            for chunk in resp.iter_content(chunk_size=8192):
-                f.write(chunk)
+            f.write(resp.read())
 
         return output_path
 
@@ -727,8 +711,8 @@ class OGCServicesConnector:
         if hasattr(wfs, "getOperationByName"):
             try:
                 available_formats = list(wfs.getOperationByName("GetFeature").formatOptions)
-            except Exception:
-                pass
+            except (AttributeError, KeyError):
+                pass  # operation may not expose formatOptions
 
         output_format = self._select_format(available_formats, _PREFERRED_WFS_FORMATS)
         if not output_format:
@@ -766,8 +750,9 @@ class OGCServicesConnector:
             content = resp
 
         # Save to temp file first
+        safe_name = self._sanitize_layer_name(layer_name)
         suffix = ".geojson" if "json" in output_format.lower() else ".gml"
-        temp_path = workspace / f"{layer_name}_temp{suffix}"
+        temp_path = workspace / f"{safe_name}_temp{suffix}"
         temp_path.parent.mkdir(parents=True, exist_ok=True)
 
         if isinstance(content, bytes):
@@ -776,7 +761,7 @@ class OGCServicesConnector:
             temp_path.write_text(str(content), encoding="utf-8")
 
         # Convert to GeoPackage via fiona
-        output_path = workspace / f"{layer_name}.gpkg"
+        output_path = workspace / f"{safe_name}.gpkg"
 
         try:
             import fiona
@@ -793,9 +778,9 @@ class OGCServicesConnector:
             temp_path.unlink()
 
         except Exception as e:
-            # If conversion fails, return the raw file
+            # Clean up temp file on failure — don't silently return raw format
             if temp_path.exists():
-                return temp_path
+                temp_path.unlink()
             raise MaterializeError(
                 layer_name, f"Failed to convert WFS response to GeoPackage: {e}"
             ) from e
@@ -875,8 +860,8 @@ class OGCServicesConnector:
         if hasattr(wfs, "getOperationByName"):
             try:
                 available_formats = list(wfs.getOperationByName("GetFeature").formatOptions)
-            except Exception:
-                pass
+            except (AttributeError, KeyError):
+                pass  # operation may not expose formatOptions
 
         keywords = []
         if hasattr(feature_type, "keywords"):
@@ -894,6 +879,25 @@ class OGCServicesConnector:
     # -----------------------------------------------------------------------
     # Helpers
     # -----------------------------------------------------------------------
+
+    @staticmethod
+    def _sanitize_layer_name(layer_name: str) -> str:
+        """Strip path separators and traversal sequences from layer names."""
+        import re
+
+        # Take only the final path component, then remove non-alphanum except .-_
+        name = Path(layer_name).name
+        name = re.sub(r"[^\w.\-]", "_", name)
+        return name or "layer"
+
+    @staticmethod
+    def _validate_url(url: str) -> None:
+        """Reject non-HTTP(S) URLs to prevent SSRF via file:// or metadata endpoints."""
+        from urllib.parse import urlparse
+
+        parsed = urlparse(url)
+        if parsed.scheme.lower() not in ("http", "https"):
+            raise MaterializeError(url, f"Only http/https URLs are allowed, got '{parsed.scheme}'")
 
     @staticmethod
     def _select_format(available: list[str], preferred: list[str]) -> str | None:
@@ -917,5 +921,5 @@ class OGCServicesConnector:
 
             with fiona.open(path) as src:
                 return len(src)
-        except Exception:
+        except (ImportError, OSError):
             return None

@@ -111,10 +111,6 @@ class FlatGeobufConnector:
     capability via GDAL's virtual filesystem.
     """
 
-    def __init__(self) -> None:
-        """Initialize FlatGeobuf connector."""
-        pass
-
     @property
     def name(self) -> str:
         return "flatgeobuf"
