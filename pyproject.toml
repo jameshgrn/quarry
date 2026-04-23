@@ -18,6 +18,7 @@ quarry-cli = { workspace = true }
 [dependency-groups]
 dev = [
     "matplotlib>=3.10.8",
+    "netcdf4>=1.7.3",
     "pillow>=12.2.0",
     "pytest>=7.0.0",
     "pytz>=2024.1",
