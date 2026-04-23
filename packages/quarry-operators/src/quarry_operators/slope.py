@@ -40,8 +40,9 @@ class SlopeParams(OperatorParams):
     """Parameters for slope calculation."""
 
     output_path: str = ""
-    # Output units for slope
-    units: Literal["degrees", "percent", "radians"] = "degrees"
+    # Output units for slope: degrees (0-90), percent (rise/run * 100),
+    # radians (0-π/2), or m_m (rise/run, dimensionless)
+    units: Literal["degrees", "percent", "radians", "m_m"] = "degrees"
     # Nodata value override (None = read from source)
     nodata: float | None = None
     # Nodata value for output slope raster
@@ -94,7 +95,7 @@ class SlopeOperator:
         if not params.output_path:
             errors.append("output_path is required")
 
-        if params.units not in ("degrees", "percent", "radians"):
+        if params.units not in ("degrees", "percent", "radians", "m_m"):
             errors.append(f"Invalid units: {params.units}")
 
         return errors
@@ -167,8 +168,10 @@ class SlopeOperator:
                 slope = slope_rad
             elif params.units == "degrees":
                 slope = np.degrees(slope_rad)
-            else:  # percent
+            elif params.units == "percent":
                 slope = np.tan(slope_rad) * 100.0
+            else:  # m_m (rise/run, dimensionless)
+                slope = np.tan(slope_rad)
 
             # Apply nodata mask
             slope[~valid] = params.output_nodata
@@ -291,7 +294,7 @@ class SlopeOperator:
                             message=f"Negative slope values found: {min_val:.2f}%",
                         )
                     )
-            else:  # radians
+            elif params.units == "radians":
                 if min_val >= 0 and max_val <= np.pi / 2:
                     results.append(
                         CheckResult(
@@ -306,6 +309,24 @@ class SlopeOperator:
                             check_name="valid_range",
                             state=ValidationState.INVALID,
                             message=f"Slope out of range: {min_val:.4f} to {max_val:.4f} rad",
+                        )
+                    )
+            else:  # m_m (rise/run, dimensionless)
+                # m/m can be any non-negative value (0 to theoretically infinity)
+                if min_val >= 0:
+                    results.append(
+                        CheckResult(
+                            check_name="valid_range",
+                            state=ValidationState.VALID,
+                            message=f"Slope range: {min_val:.4f} to {max_val:.4f} m/m",
+                        )
+                    )
+                else:
+                    results.append(
+                        CheckResult(
+                            check_name="valid_range",
+                            state=ValidationState.INVALID,
+                            message=f"Negative slope values found: {min_val:.4f} m/m",
                         )
                     )
         else:

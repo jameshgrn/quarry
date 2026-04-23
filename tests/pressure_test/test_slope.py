@@ -217,6 +217,12 @@ class TestValidation:
         errors = op.validate_inputs([art], SlopeParams(output_path="/tmp/x.tif", units="feet"))
         assert any("units" in e.lower() for e in errors)
 
+    def test_accepts_m_m_units(self, op, flat_dem):
+        path, _ = flat_dem
+        art = _make_artifact(path)
+        errors = op.validate_inputs([art], SlopeParams(output_path="/tmp/x.tif", units="m_m"))
+        assert errors == []
+
     def test_accepts_valid_input(self, op, flat_dem):
         path, _ = flat_dem
         art = _make_artifact(path)
@@ -249,7 +255,7 @@ class TestFlatSurface:
         path, _ = flat_dem
         art = _make_artifact(path)
 
-        for units in ["degrees", "percent", "radians"]:
+        for units in ["degrees", "percent", "radians", "m_m"]:
             output = tmp_path / f"slope_{units}.tif"
             params = SlopeParams(output_path=str(output), units=units)
             op.execute([art], params)
@@ -258,6 +264,21 @@ class TestFlatSurface:
                 slope = src.read(1)
                 valid = slope != params.output_nodata
                 assert np.all(slope[valid] == 0.0), f"Failed for {units}"
+
+    def test_45_degree_in_m_m(self, op, inclined_plane_45, tmp_path):
+        """45° incline = 1.0 m/m (rise = run)."""
+        path, _ = inclined_plane_45
+        art = _make_artifact(path)
+        output = tmp_path / "slope.tif"
+        params = SlopeParams(output_path=str(output), units="m_m")
+
+        op.execute([art], params)
+
+        with rasterio.open(output) as src:
+            slope = src.read(1)
+            interior = slope[1:-1, 1:-1]
+            # tan(45°) = 1.0
+            np.testing.assert_allclose(interior, 1.0, rtol=1e-10)
 
 
 class TestInclinedPlane:

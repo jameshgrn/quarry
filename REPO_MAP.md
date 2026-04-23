@@ -67,7 +67,7 @@ quarry/                          # Monorepo root
 │   │   ├── test_source_ref.py  # SourceRef contract (34)
 │   │   ├── test_connector_router.py # ConnectorRouter routing (34)
 │   │   ├── test_fill_depressions.py # FillDepressions hydrology op (30)
-│   │   ├── test_slope.py            # Slope terrain op (29)
+│   │   ├── test_slope.py            # Slope terrain op (31)
 │   │   ├── test_d8_flow_direction.py # D8 flow direction + chain tests (27)
 │   │   ├── test_flow_accumulation.py # Flow accumulation + full chain (27)
 │   │   ├── test_hydrology_flow.py # Hydrology chain composition (27+15)

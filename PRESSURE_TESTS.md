@@ -841,13 +841,13 @@ operator pattern through CLI. Zero contract changes. 495 total tests passing.
 ## 26. Slope Operator — Terrain Lane (2026-04-22)
 
 **Components:** SlopeOperator, SlopeParams
-**Tests:** 29 (new operator)
+**Tests:** 31 (new operator)
 **Contract changes:** None — follows existing Operator protocol
 
 **Proved:**
 - Slope from DEM using central difference gradients (numpy.gradient)
 - Correct handling of cell dimensions from raster transform (not assuming 1x1 cells)
-- Three unit conversions: degrees (0-90°), percent, radians
+- Four unit conversions: degrees (0-90°), percent, radians, m_m (rise/run)
 - Edge cases: single row, single column, all-nodata, tiny (3x3) grids
 - 45° inclined plane produces exactly 45° / 100% / π/4 radians
 - Flat DEM produces zero slope everywhere
