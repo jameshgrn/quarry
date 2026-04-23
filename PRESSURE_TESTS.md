@@ -837,3 +837,29 @@ operator pattern through CLI. Zero contract changes. 495 total tests passing.
 - None new. Cleanup only.
 
 **Summary:** Fourteen pressure tests (verification). Contract cleanup in HydrologyFlow. Repo hygiene. 578 total tests passing.
+
+## 26. Slope Operator — Terrain Lane (2026-04-22)
+
+**Components:** SlopeOperator, SlopeParams
+**Tests:** 29 (new operator)
+**Contract changes:** None — follows existing Operator protocol
+
+**Proved:**
+- Slope from DEM using central difference gradients (numpy.gradient)
+- Correct handling of cell dimensions from raster transform (not assuming 1x1 cells)
+- Three unit conversions: degrees (0-90°), percent, radians
+- Edge cases: single row, single column, all-nodata, tiny (3x3) grids
+- 45° inclined plane produces exactly 45° / 100% / π/4 radians
+- Flat DEM produces zero slope everywhere
+- Parabolic surface: slope increases with distance from center
+- Nodata preservation: input nodata → output nodata
+- Checks: valid_range (unit-specific), nodata_preserved, resolution_consistent
+- Zero-dependency core maintained (rasterio only in operators package)
+- Lineage records units and algorithm: "central_difference_gradient"
+
+**Operators:** 11 total (added slope.py between fill_depressions and d8_flow_direction)
+
+**Debt observed:**
+- None. Pure addition, no contract changes.
+
+**Summary:** Twenty-nine pressure tests. Eleventh operator (terrain lane). Zero contract changes. 607 total tests passing.

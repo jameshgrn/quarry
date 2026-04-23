@@ -36,12 +36,13 @@ quarry/                          # Monorepo root
 │   │       ├── clip_raster.py       # ClipRasterOperator (bounds + mask)
 │   │       ├── reproject.py         # ReprojectOperator (raster + vector CRS transform)
 │   │       ├── fill_depressions.py  # FillDepressionsOperator (Priority-Flood DEM preprocessing)
+│   │       ├── slope.py             # SlopeOperator (terrain slope from DEM)
 │   │       ├── d8_flow_direction.py # D8FlowDirectionOperator (steepest descent + flat resolution)
 │   │       ├── flow_accumulation.py # FlowAccumulationOperator (toposort upstream area)
 │   │       ├── zonal_stats.py       # ZonalStatsOperator (raster+vector → per-zone CSV stats)
 │   │       ├── spatial_join.py      # SpatialJoinOperator (vector×vector left join, intersects)
-│   │       ├── sample_raster.py      # SampleRasterOperator (raster+points → per-point CSV values)
-│   │       ├── rasterize_vector.py  # RasterizeVectorOperator (vector polygons → raster grid)
+│   │       ├── sample_raster.py     # SampleRasterOperator (raster+points → per-point CSV values)
+│   │       ├── rasterize_vector.py   # RasterizeVectorOperator (vector polygons → raster grid)
 │   │       ├── build_cog.py        # BuildCOGOperator (raster → COG normalization)
 │   │       ├── checks.py           # Standalone checks (InternalOutletCount)
 │   │       └── hydrology_flow.py   # HydrologyFlow (fill→D8→accumulation chain)
@@ -55,7 +56,7 @@ quarry/                          # Monorepo root
 │           └── main.py          # argparse CLI: artifacts list/show, lineage, run hydrology/zonal
 │
 ├── tests/
-│   ├── pressure_test/           # Substrate pressure tests (578 tests, 24 suites)
+│   ├── pressure_test/           # Substrate pressure tests (607 tests, 25 suites)
 │   │   ├── conftest.py          # PYTHONPATH setup for dev
 │   │   ├── test_end_to_end.py   # Kernel: connector → operator → executor (15)
 │   │   ├── test_registry.py     # Registry round-trips (18)
@@ -66,6 +67,7 @@ quarry/                          # Monorepo root
 │   │   ├── test_source_ref.py  # SourceRef contract (34)
 │   │   ├── test_connector_router.py # ConnectorRouter routing (34)
 │   │   ├── test_fill_depressions.py # FillDepressions hydrology op (30)
+│   │   ├── test_slope.py            # Slope terrain op (29)
 │   │   ├── test_d8_flow_direction.py # D8 flow direction + chain tests (27)
 │   │   ├── test_flow_accumulation.py # Flow accumulation + full chain (27)
 │   │   ├── test_hydrology_flow.py # Hydrology chain composition (27+15)
