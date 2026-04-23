@@ -56,10 +56,18 @@ Preserve the ontology. Do not invent parallel abstractions.
 ## Raiding source: hydrops/
 
 `hydrops/` lives in repo root as an unintegrated reference codebase. It is NOT a package.
+Trimmed 2026-04-23: all dead reports, analysis scripts, demo scripts, CSV/JSON data, and PDFs removed. What remains is extractable source, reference docs, and supporting tests.
 
 **Extractable targets (ranked by substrate value):**
-1. Check patterns — backend compliance, conservation residuals, seam mismatch detection
-2. Tile scheduler concepts — TileStageGraph, memory-bounded batching (future executor)
+1. Check patterns — `contracts/backend_compliance.py`, `evals/eval5_accum.py` (conservation residuals, seam mismatch detection)
+2. Tile scheduler concepts — `topology/tilestagegraph.py`, `local_scheduler.py` (multi-stage dependency graph, memory-bounded batching)
+3. D8 boundary export — `engine.py` (tile-to-global flow stitching, boundary flow ring export)
+4. Backend protocol — `contracts/backend_contract.py`, `contracts/backend_protocol.py` (MVB validation, runtime-checkable engine interface)
+
+**Reference docs (read when extracting):**
+- `docs/backend_boundary_note.md` — normative spec for backend compliance
+- `docs/ARCHITECTURE_TILEGRAPH.md` — TileGraph concept and execution model
+- `docs/ARCHITECTURE_MEMORY_AWARE_PIPELINE.md` — memory budget formulas
 
 **Rules:** Extract one piece at a time. Rewrite to fit quarry contracts. Pressure-test before merging. Do NOT import wholesale.
 
@@ -67,7 +75,7 @@ Preserve the ontology. Do not invent parallel abstractions.
 
 Substrate phase is complete. The current surface:
 - 4 connectors: LocalFile, STAC, PostGIS, COG
-- 10 operators: ClipRaster, Reproject, FillDepressions, D8FlowDirection, FlowAccumulation, ZonalStats, SpatialJoin, BuildCOG, SampleRaster, RasterizeVector
+- 12 operators: ClipRaster, Reproject, FillDepressions, Slope, Aspect, D8FlowDirection, FlowAccumulation, ZonalStats, SpatialJoin, BuildCOG, SampleRaster, RasterizeVector
 - 1 flow: HydrologyFlow (fill→D8→accumulation)
 - 1 executor: LocalExecutor
 - ConnectorRouter for source-ref-based connector selection

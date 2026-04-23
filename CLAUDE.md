@@ -96,7 +96,7 @@ just tree          # Show package dependency graph
 Substrate phase is complete. All criteria met:
 - Core ontology stable across the pressure surface
 - 4 connectors: LocalFile, STAC, PostGIS, COG
-- 10 operators: ClipRaster, Reproject, FillDepressions, D8FlowDirection, FlowAccumulation, ZonalStats, SpatialJoin, BuildCOG, SampleRaster, RasterizeVector
+- 12 operators: ClipRaster, Reproject, FillDepressions, Slope, Aspect, D8FlowDirection, FlowAccumulation, ZonalStats, SpatialJoin, BuildCOG, SampleRaster, RasterizeVector
 - Registry persists artifacts/runs/checks/lineage
 - End-to-end flow works (HydrologyFlow + zonal stats + COG export)
 - Use `just stats` for current collected test counts

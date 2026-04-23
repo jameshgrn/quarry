@@ -8,8 +8,47 @@ No workflow engine, no config files, no plugin system.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
+
+from quarry_connectors.cog import COGConnector
+from quarry_connectors.local_file import LocalFileConnector
+from quarry_connectors.postgis import PostGISConnector
+from quarry_connectors.stac import STACConnector
+from quarry_core.router import ConnectorRouter
+from quarry_core.source_ref import SourceRef, SourceRefKind
+
+
+def _get_router() -> ConnectorRouter:
+    """Create and configure a ConnectorRouter with all available connectors."""
+    router = ConnectorRouter()
+    # COGConnector has priority 0 for raster routing (higher priority)
+    router.register(
+        COGConnector(),
+        priority=0,
+        kinds=[SourceRefKind.LOCAL_RASTER, SourceRefKind.REMOTE_URI],
+    )
+    # STACConnector handles STAC catalogs and items
+    stac_api = os.environ.get("STAC_API_URL", "https://earth-search.aws.element84.com/v0")
+    router.register(
+        STACConnector(api_url=stac_api),
+        priority=0,
+        kinds=[SourceRefKind.CATALOG_ITEM],
+    )
+    # PostGISConnector handles database references
+    router.register(
+        PostGISConnector(),
+        priority=0,
+        kinds=[SourceRefKind.DATABASE_REF],
+    )
+    # LocalFileConnector is fallback with priority 10
+    router.register(
+        LocalFileConnector(),
+        priority=10,
+        kinds=[SourceRefKind.LOCAL_PATH, SourceRefKind.LOCAL_RASTER, SourceRefKind.LOCAL_VECTOR],
+    )
+    return router
 
 
 def _resolve_workspace(args) -> Path:
@@ -282,7 +321,6 @@ def cmd_checks_show(args) -> int:
 
 
 def cmd_run_hydrology(args) -> int:
-    from quarry_connectors.local_file import LocalFileConnector
     from quarry_core.executors.local import LocalExecutor
     from quarry_operators.hydrology_flow import HydrologyFlow, HydrologyFlowParams
     from quarry_registry.registry import Registry
@@ -294,8 +332,13 @@ def cmd_run_hydrology(args) -> int:
 
     workspace = _resolve_workspace(args)
 
-    # Materialize DEM through connector
-    connector = LocalFileConnector()
+    # Materialize DEM through router
+    router = _get_router()
+    source_ref = SourceRef.local(str(dem_path))
+    match = router.select_one(source_ref)
+    if not match:
+        raise ValueError(f"No connector found for {source_ref}")
+    connector = match.connector
     print(f"Materializing DEM: {dem_path}")
     result = connector.materialize(str(dem_path), workspace)
     dem_artifact = result.artifact
@@ -341,7 +384,6 @@ def cmd_run_hydrology(args) -> int:
 
 
 def cmd_run_zonal(args) -> int:
-    from quarry_connectors.local_file import LocalFileConnector
     from quarry_core.executors.local import LocalExecutor
     from quarry_operators.zonal_stats import ZonalStatsOperator, ZonalStatsParams
     from quarry_registry.registry import Registry
@@ -358,13 +400,22 @@ def cmd_run_zonal(args) -> int:
 
     workspace = _resolve_workspace(args)
 
-    # Materialize both inputs through connector
-    connector = LocalFileConnector()
+    # Materialize both inputs through router
+    router = _get_router()
+
     print(f"Materializing raster: {raster_path}")
-    raster_artifact = connector.materialize(str(raster_path), workspace).artifact
+    raster_source_ref = SourceRef.local(str(raster_path))
+    raster_match = router.select_one(raster_source_ref)
+    if not raster_match:
+        raise ValueError(f"No connector found for {raster_source_ref}")
+    raster_artifact = raster_match.connector.materialize(str(raster_path), workspace).artifact
 
     print(f"Materializing zones: {zones_path}")
-    zones_artifact = connector.materialize(str(zones_path), workspace).artifact
+    zones_source_ref = SourceRef.local(str(zones_path))
+    zones_match = router.select_one(zones_source_ref)
+    if not zones_match:
+        raise ValueError(f"No connector found for {zones_source_ref}")
+    zones_artifact = zones_match.connector.materialize(str(zones_path), workspace).artifact
 
     # Set up executor + registry
     executor = LocalExecutor()
@@ -416,7 +467,6 @@ def cmd_run_zonal(args) -> int:
 
 
 def cmd_run_sample(args) -> int:
-    from quarry_connectors.local_file import LocalFileConnector
     from quarry_core.executors.local import LocalExecutor
     from quarry_operators.sample_raster import SampleRasterOperator, SampleRasterParams
     from quarry_registry.registry import Registry
@@ -433,13 +483,22 @@ def cmd_run_sample(args) -> int:
 
     workspace = _resolve_workspace(args)
 
-    # Materialize both inputs through connector
-    connector = LocalFileConnector()
+    # Materialize both inputs through router
+    router = _get_router()
+
     print(f"Materializing raster: {raster_path}")
-    raster_artifact = connector.materialize(str(raster_path), workspace).artifact
+    raster_source_ref = SourceRef.local(str(raster_path))
+    raster_match = router.select_one(raster_source_ref)
+    if not raster_match:
+        raise ValueError(f"No connector found for {raster_source_ref}")
+    raster_artifact = raster_match.connector.materialize(str(raster_path), workspace).artifact
 
     print(f"Materializing points: {points_path}")
-    points_artifact = connector.materialize(str(points_path), workspace).artifact
+    points_source_ref = SourceRef.local(str(points_path))
+    points_match = router.select_one(points_source_ref)
+    if not points_match:
+        raise ValueError(f"No connector found for {points_source_ref}")
+    points_artifact = points_match.connector.materialize(str(points_path), workspace).artifact
 
     # Set up executor + registry
     executor = LocalExecutor()
@@ -503,7 +562,6 @@ def cmd_run_sample(args) -> int:
 
 
 def cmd_run_rasterize(args) -> int:
-    from quarry_connectors.local_file import LocalFileConnector
     from quarry_core.executors.local import LocalExecutor
     from quarry_operators.rasterize_vector import (
         RasterizeVectorOperator,
@@ -518,8 +576,13 @@ def cmd_run_rasterize(args) -> int:
 
     workspace = _resolve_workspace(args)
 
-    # Materialize input through connector
-    connector = LocalFileConnector()
+    # Materialize input through router
+    router = _get_router()
+    vector_source_ref = SourceRef.local(str(vector_path))
+    vector_match = router.select_one(vector_source_ref)
+    if not vector_match:
+        raise ValueError(f"No connector found for {vector_source_ref}")
+    connector = vector_match.connector
     print(f"Materializing vector: {vector_path}")
     vector_artifact = connector.materialize(str(vector_path), workspace).artifact
 

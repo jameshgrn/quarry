@@ -238,40 +238,6 @@ domain incision. Zero contract changes. 187 total tests passing.
 **Debt observed:**
 - Pure Python loops same as FillDepressions — numba deferred
 - Flat resolution iterates until convergence — worst case O(n) iterations on pathological flats.
-
-## 19. Registry Integrity Repair (2026-04-22)
-
-**Components:** Registry persistence, SourceRef routing, LocalExecutor failure semantics, HydrologyFlow
-**Tests:** targeted updates to registry, source_ref, connector_router, hydrology_flow, end_to_end
-**Contract changes:** YES — SourceRef local kinds split into LOCAL_RASTER / LOCAL_VECTOR / LOCAL_PATH; executor failure is now represented as a FAILED RunRecord
-
-**Proved:**
-- Artifact lineage now round-trips through the registry instead of disappearing on load
-- OperatorResult timing, warnings, and metadata now survive run persistence
-- `save_run()` is transactional rather than a sequence of independent commits
-- Local vector paths no longer route through raster-only connectors
-- Failed flow steps are recorded as real runs, not synthetic placeholder records
-
-**Signals:**
-- The prior router kind taxonomy was too coarse to support trustworthy adapter routing
-- The prior executor/flow boundary split failure semantics across layers and forced fake state
-- Registry losslessness must be tested explicitly at the field level, not inferred from basic round-trips
-
-## 20. Adapter + Repo Surface Cleanup (2026-04-22)
-
-**Components:** CLI adapter, example workflow, workspace/test bootstrap
-**Tests:** targeted CLI pressure tests + example execution path checks
-**Contract changes:** None
-
-**Proved:**
-- Single-step CLI commands now handle failed `RunRecord`s directly instead of assuming `submit()` raises
-- Example code no longer dereferences `record.output` without checking completion
-- The repo no longer exposes `georuntime` as a parallel packaged product
-- Pressure-test bootstrap includes every active quarry package
-
-**Signals:**
-- Changing executor semantics exposed stale adapter assumptions immediately
-- Keeping a legacy package live at the root was an ontology violation, not harmless clutter
   Could use BFS from draining cells instead. Deferred.
 - No cycle detection yet — assumed acyclic after fill. Add if needed.
 
@@ -889,3 +855,68 @@ operator pattern through CLI. Zero contract changes. 495 total tests passing.
 - None. Pure addition, no contract changes.
 
 **Summary:** Twenty-eight pressure tests. Twelfth operator (terrain lane complete: slope + aspect). Zero contract changes. 635 total tests passing.
+
+## 28. ConnectorRouter Integration (2026-04-23)
+
+**Components:** ConnectorRouter, all 4 connector types (LocalFile, COG, STAC, PostGIS)
+**Tests:** 15 (new integration suite)
+**Contract changes:** None — validates existing router abstraction
+
+**Proved:**
+- **False states impossible:** Every SourceRef routes to exactly one connector, no ambiguity
+- **LOCAL_PATH** → LocalFileConnector (fallback, priority 10)
+- **LOCAL_RASTER** (.tif) → COGConnector (priority 0 wins over LocalFile at 10)
+- **REMOTE_URI** (s3://, https://, gs://) → COGConnector for cloud-optimized access
+- **CATALOG_ITEM** (STAC) → STACConnector (priority 0)
+- **DATABASE_REF** (PostGIS) → PostGISConnector (priority 0)
+- **Priority system works:** Lower number = higher precedence, independent of registration order
+- **Explicit failures:** Unknown kinds raise `NoConnectorError` (no silent fallbacks)
+- **CLI parity:** Test router configuration matches production `_get_router()` exactly
+- **Example alignment:** `watershed_analysis.py` uses full 4-connector router configuration
+
+**CLI fix validated:**
+- All 4 CLI commands (hydrology, zonal, sample, rasterize) now use `_get_router()` + `router.select_one()`
+- Previously hardcoded `LocalFileConnector()` bypassed the router entirely
+- Now supports S3, HTTPS, GCS, STAC, and PostGIS sources automatically
+
+**Connectors:** 4 total (LocalFile, COG, STAC, PostGIS) — all routing through ConnectorRouter
+
+**Debt closed:**
+- Router bypass in CLI — **FIXED**. All entry points now use ConnectorRouter.
+- Router bypass in examples — **FIXED**. `watershed_analysis.py` demonstrates canonical pattern.
+
+**Summary:** Fifteen integration pressure tests. ConnectorRouter abstraction validated across all source types. False states now impossible. 652 total tests passing.
+
+## 29. Registry Integrity Repair (2026-04-22)
+
+**Components:** Registry persistence, SourceRef routing, LocalExecutor failure semantics, HydrologyFlow
+**Tests:** targeted updates to registry, source_ref, connector_router, hydrology_flow, end_to_end
+**Contract changes:** YES — SourceRef local kinds split into LOCAL_RASTER / LOCAL_VECTOR / LOCAL_PATH; executor failure is now represented as a FAILED RunRecord
+
+**Proved:**
+- Artifact lineage now round-trips through the registry instead of disappearing on load
+- OperatorResult timing, warnings, and metadata now survive run persistence
+- `save_run()` is transactional rather than a sequence of independent commits
+- Local vector paths no longer route through raster-only connectors
+- Failed flow steps are recorded as real runs, not synthetic placeholder records
+
+**Signals:**
+- The prior router kind taxonomy was too coarse to support trustworthy adapter routing
+- The prior executor/flow boundary split failure semantics across layers and forced fake state
+- Registry losslessness must be tested explicitly at the field level, not inferred from basic round-trips
+
+## 30. Adapter + Repo Surface Cleanup (2026-04-22)
+
+**Components:** CLI adapter, example workflow, workspace/test bootstrap
+**Tests:** targeted CLI pressure tests + example execution path checks
+**Contract changes:** None
+
+**Proved:**
+- Single-step CLI commands now handle failed `RunRecord`s directly instead of assuming `submit()` raises
+- Example code no longer dereferences `record.output` without checking completion
+- The repo no longer exposes `georuntime` as a parallel packaged product
+- Pressure-test bootstrap includes every active quarry package
+
+**Signals:**
+- Changing executor semantics exposed stale adapter assumptions immediately
+- Keeping a legacy package live at the root was an ontology violation, not harmless clutter

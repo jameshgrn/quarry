@@ -57,7 +57,7 @@ quarry/                          # Monorepo root
 │           └── main.py          # argparse CLI: artifacts list/show, lineage, run hydrology/zonal
 │
 ├── tests/
-│   ├── pressure_test/           # Substrate pressure tests (635 tests, 26 suites)
+│   ├── pressure_test/           # Substrate pressure tests (652 tests, 30 suites)
 │   │   ├── conftest.py          # PYTHONPATH setup for dev
 │   │   ├── test_end_to_end.py   # Kernel: connector → operator → executor (15)
 │   │   ├── test_registry.py     # Registry round-trips (18)
@@ -84,7 +84,8 @@ quarry/                          # Monorepo root
 │   │   ├── test_cli_zonal.py    # CLI adapter: run zonal end-to-end (12)
 │   │   ├── test_cli_inspection.py # CLI adapter: runs list/show, checks show (20)
 │   │   ├── test_cli_sample.py   # CLI adapter: run sample end-to-end (19)
-│   │   └── test_cli_rasterize.py # CLI adapter: run rasterize end-to-end (26)
+│   │   ├── test_cli_rasterize.py # CLI adapter: run rasterize end-to-end (26)
+│   │   └── test_router_integration.py # ConnectorRouter integration across all connectors (15)
 │   └── fixtures/                # Test data (gitignored binaries)
 │
 ├── examples/
