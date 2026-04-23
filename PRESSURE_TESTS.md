@@ -863,3 +863,29 @@ operator pattern through CLI. Zero contract changes. 495 total tests passing.
 - None. Pure addition, no contract changes.
 
 **Summary:** Twenty-nine pressure tests. Eleventh operator (terrain lane). Zero contract changes. 607 total tests passing.
+
+## 27. Aspect Operator — Terrain Lane (2026-04-22)
+
+**Components:** AspectOperator, AspectParams
+**Tests:** 28 (new operator)
+**Contract changes:** None — follows existing Operator protocol
+
+**Proved:**
+- Aspect from DEM using central difference gradients (numpy.gradient)
+- Compass convention: 0°=North, 90°=East, 180°=South, 270°=West
+- Math convention: 0°=East, 90°=North, 180°=West, 270°=South (CCW)
+- Cardinal direction correctness: north (0°), east (90°), south (180°), west (270°)
+- Diagonal direction correctness: northeast (~45°)
+- Flat areas get flat_value (-1 by default, configurable)
+- Edge cases: single row, single column, all-nodata, tiny (3x3) grids
+- Nodata preservation: input nodata → output nodata
+- Checks: valid_range (0-360°), nodata_preserved, resolution_consistent
+- Zero-dependency core maintained
+- Lineage records convention and algorithm: "central_difference_gradient"
+
+**Operators:** 12 total (added aspect.py after slope.py)
+
+**Debt observed:**
+- None. Pure addition, no contract changes.
+
+**Summary:** Twenty-eight pressure tests. Twelfth operator (terrain lane complete: slope + aspect). Zero contract changes. 635 total tests passing.
