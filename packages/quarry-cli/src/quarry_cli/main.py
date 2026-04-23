@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 
 from quarry_connectors.cog import COGConnector
+from quarry_connectors.duckdb_connector import DuckDBConnector
 from quarry_connectors.local_file import LocalFileConnector
 from quarry_connectors.postgis import PostGISConnector
 from quarry_connectors.stac import STACConnector
@@ -41,6 +42,12 @@ def _get_router() -> ConnectorRouter:
         PostGISConnector(),
         priority=0,
         kinds=[SourceRefKind.DATABASE_REF],
+    )
+    # DuckDBConnector handles DuckDB database files
+    router.register(
+        DuckDBConnector(),
+        priority=0,
+        kinds=[SourceRefKind.DUCKDB],
     )
     # LocalFileConnector is fallback with priority 10
     router.register(

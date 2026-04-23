@@ -13,6 +13,7 @@ import os
 
 import pytest
 from quarry_connectors.cog import COGConnector
+from quarry_connectors.duckdb_connector import DuckDBConnector
 from quarry_connectors.local_file import LocalFileConnector
 from quarry_connectors.postgis import PostGISConnector
 from quarry_connectors.stac import STACConnector
@@ -44,6 +45,13 @@ def _get_test_router():
         PostGISConnector(),
         priority=0,
         kinds=[SourceRefKind.DATABASE_REF],
+    )
+
+    # DuckDBConnector: priority 0 for DuckDB database files
+    router.register(
+        DuckDBConnector(),
+        priority=0,
+        kinds=[SourceRefKind.DUCKDB],
     )
 
     # LocalFileConnector: priority 10 (fallback) for local files
@@ -191,6 +199,32 @@ class TestRouterPostGISRouting:
         assert isinstance(match.connector, PostGISConnector)
 
 
+class TestRouterDuckDBRouting:
+    """Validate DUCKDB routing to DuckDBConnector."""
+
+    def test_duckdb_table_routes_to_duckdb_connector(self):
+        """DuckDB tables via SourceRef.duckdb() should route to DuckDBConnector."""
+        router = _get_test_router()
+        source = SourceRef.duckdb("/data/analytics.duckdb", "measurements")
+
+        match = router.select_one(source)
+
+        assert match is not None, "Expected DuckDB routing to match"
+        assert isinstance(match.connector, DuckDBConnector), (
+            f"Expected DuckDBConnector, got {type(match.connector).__name__}"
+        )
+
+    def test_duckdb_query_routes_to_duckdb_connector(self):
+        """DuckDB queries via SourceRef.duckdb_query() should route to DuckDBConnector."""
+        router = _get_test_router()
+        source = SourceRef.duckdb_query("/data/analytics.duckdb", "SELECT * FROM t")
+
+        match = router.select_one(source)
+
+        assert match is not None
+        assert isinstance(match.connector, DuckDBConnector)
+
+
 class TestRouterErrorHandling:
     """Validate error cases: unmatched sources must fail explicitly."""
 
@@ -270,6 +304,7 @@ class TestRouterCLIIntegration:
                 STACConnector,
             ),
             ("database_ref", "public.watersheds", SourceRefKind.DATABASE_REF, PostGISConnector),
+            ("duckdb", "/data/my.duckdb::table1", SourceRefKind.DUCKDB, DuckDBConnector),
         ]
 
         for test_name, uri, expected_kind, expected_type in test_cases:
@@ -285,6 +320,9 @@ class TestRouterCLIIntegration:
             elif test_name == "database_ref":
                 parts = uri.split(".")
                 source = SourceRef.postgis(parts[0], parts[1])
+            elif test_name == "duckdb":
+                db_part, tbl_part = uri.split("::")
+                source = SourceRef.duckdb(db_part, tbl_part)
 
             match = router.select_one(source)
             assert match is not None, f"No match for {uri} ({test_name})"

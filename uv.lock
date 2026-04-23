@@ -8,7 +8,7 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "2026-04-15T16:52:37.753364Z"
+exclude-newer = "2026-04-16T07:03:40.137518Z"
 exclude-newer-span = "P7D"
 
 [manifest]
@@ -1212,6 +1212,7 @@ name = "quarry-connectors"
 version = "0.1.0"
 source = { editable = "packages/quarry-connectors" }
 dependencies = [
+    { name = "duckdb" },
     { name = "fiona" },
     { name = "psycopg", extra = ["binary"] },
     { name = "pystac-client" },
@@ -1228,6 +1229,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "duckdb", specifier = ">=1.0.0" },
     { name = "fiona", specifier = ">=1.9.0" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.1.0" },
     { name = "pystac-client", specifier = ">=0.7.0" },

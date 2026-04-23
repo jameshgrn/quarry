@@ -36,6 +36,7 @@ class BackingStoreKind(Enum):
     LOCAL_FILE = "local_file"
     LAZY_HANDLE = "lazy_handle"  # metadata known, data not yet fetched
     POSTGIS = "postgis"  # table/layer in PostGIS
+    DUCKDB = "duckdb"  # table in a DuckDB database file
 
 
 class ValidationState(Enum):

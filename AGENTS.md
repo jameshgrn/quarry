@@ -74,7 +74,7 @@ Trimmed 2026-04-23: all dead reports, analysis scripts, demo scripts, CSV/JSON d
 ## Current status
 
 Substrate phase is complete. The current surface:
-- 4 connectors: LocalFile, STAC, PostGIS, COG
+- 5 connectors: LocalFile, STAC, PostGIS, COG, DuckDB
 - 12 operators: ClipRaster, Reproject, FillDepressions, Slope, Aspect, D8FlowDirection, FlowAccumulation, ZonalStats, SpatialJoin, BuildCOG, SampleRaster, RasterizeVector
 - 1 flow: HydrologyFlow (fill→D8→accumulation)
 - 1 executor: LocalExecutor

@@ -29,7 +29,8 @@ quarry/                          # Monorepo root
 │   │       ├── local_file.py    # LocalFileConnector (raster + vector, eager + lazy)
 │   │       ├── stac.py          # STACConnector (catalog search, asset selection, lazy/eager)
 │   │       ├── postgis.py       # PostGISConnector (schema.table, queries, geometry/non-geometry)
-│   │       └── cog.py           # COGConnector (local/remote COG, validation, I/O metrics)
+│   │       ├── cog.py           # COGConnector (local/remote COG, validation, I/O metrics)
+│   │       └── duckdb_connector.py # DuckDBConnector (path.duckdb::table, geometry/non-geometry)
 │   │
 │   ├── quarry-operators/        # Deps: rasterio, fiona, shapely
 │   │   └── src/quarry_operators/
@@ -85,7 +86,8 @@ quarry/                          # Monorepo root
 │   │   ├── test_cli_inspection.py # CLI adapter: runs list/show, checks show (20)
 │   │   ├── test_cli_sample.py   # CLI adapter: run sample end-to-end (19)
 │   │   ├── test_cli_rasterize.py # CLI adapter: run rasterize end-to-end (26)
-│   │   └── test_router_integration.py # ConnectorRouter integration across all connectors (15)
+│   │   ├── test_router_integration.py # ConnectorRouter integration across all connectors (15)
+│   │   └── test_duckdb_connector.py # DuckDB connector: table/query/spatial/lazy/discover (42)
 │   └── fixtures/                # Test data (gitignored binaries)
 │
 ├── examples/
@@ -101,7 +103,7 @@ quarry/                          # Monorepo root
 ```
 quarry-core (zero deps)
   ↑
-quarry-connectors (+ rasterio, fiona, pystac-client, psycopg, shapely)
+quarry-connectors (+ rasterio, fiona, pystac-client, psycopg, shapely, duckdb)
 quarry-operators  (+ rasterio, fiona, shapely)
 quarry-registry   (+ duckdb)
   ↑

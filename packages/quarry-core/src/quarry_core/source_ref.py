@@ -36,7 +36,8 @@ class SourceRefKind(Enum):
     LOCAL_VECTOR = "local_vector"  # local vector/table path
     REMOTE_URI = "remote_uri"  # http/https/s3/gs URL
     CATALOG_ITEM = "catalog_item"  # catalog/collection reference (STAC-like)
-    DATABASE_REF = "database_ref"  # schema.table or SQL query
+    DATABASE_REF = "database_ref"  # schema.table or SQL query (PostGIS)
+    DUCKDB = "duckdb"  # DuckDB database file + table or query
     UNKNOWN = "unknown"  # unclassified raw string
 
 
@@ -161,6 +162,30 @@ class SourceRef:
             params={"query": sql},
         )
 
+    @classmethod
+    def duckdb(cls, db_path: str, table: str) -> SourceRef:
+        """Construct a DuckDB table reference.
+
+        Produces raw in the format: "path/to/file.duckdb::table_name"
+        """
+        return cls(
+            raw=f"{db_path}::{table}",
+            kind=SourceRefKind.DUCKDB,
+            params={"db_path": db_path, "table": table},
+        )
+
+    @classmethod
+    def duckdb_query(cls, db_path: str, sql: str) -> SourceRef:
+        """Construct a DuckDB query reference.
+
+        Produces raw in the format: "path/to/file.duckdb::SELECT ..."
+        """
+        return cls(
+            raw=f"{db_path}::{sql}",
+            kind=SourceRefKind.DUCKDB,
+            params={"db_path": db_path, "query": sql},
+        )
+
     # -----------------------------------------------------------------------
     # Inference: best-effort classification from raw string
     # -----------------------------------------------------------------------
@@ -196,13 +221,24 @@ class SourceRef:
                     params={"scheme": scheme, "url": stripped},
                 )
 
-        # 2. SQL query
+        # 2. SQL query (bare, no db_path:: prefix → PostGIS DATABASE_REF)
         if stripped.upper().startswith("SELECT "):
             return cls(
                 raw=raw,
                 kind=SourceRefKind.DATABASE_REF,
                 params={"query": stripped},
             )
+
+        # 2b. DuckDB pattern: path.duckdb::table_or_query
+        if "::" in stripped:
+            db_part, ref_part = stripped.split("::", 1)
+            if db_part.lower().endswith(".duckdb") or db_part.lower().endswith(".db"):
+                params: dict[str, Any] = {"db_path": db_part}
+                if ref_part.strip().upper().startswith("SELECT "):
+                    params["query"] = ref_part
+                else:
+                    params["table"] = ref_part
+                return cls(raw=raw, kind=SourceRefKind.DUCKDB, params=params)
 
         # 3. Absolute or relative path
         if stripped.startswith("/") or stripped.startswith("./") or stripped.startswith("../"):

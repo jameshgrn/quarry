@@ -38,7 +38,7 @@ The sacred gateway. No geospatial object enters except through a connector.
 Typed envelope for source references. Lives in quarry-core (zero deps).
 
 - **raw**: the original string, always preserved, always round-trippable via `str(ref)`
-- **kind**: classification tag (LOCAL_PATH, LOCAL_RASTER, LOCAL_VECTOR, REMOTE_URI, CATALOG_ITEM, DATABASE_REF, UNKNOWN)
+- **kind**: classification tag (LOCAL_PATH, LOCAL_RASTER, LOCAL_VECTOR, REMOTE_URI, CATALOG_ITEM, DATABASE_REF, DUCKDB, UNKNOWN)
 - **params**: optional parsed fields (connector-specific structure)
 
 Factory methods:
@@ -47,6 +47,8 @@ Factory methods:
 - `SourceRef.stac(collection, item, asset=)` → CATALOG_ITEM
 - `SourceRef.postgis(schema, table)` → DATABASE_REF
 - `SourceRef.postgis_query(sql)` → DATABASE_REF
+- `SourceRef.duckdb(db_path, table)` → DUCKDB
+- `SourceRef.duckdb_query(db_path, sql)` → DUCKDB
 - `SourceRef.infer(raw)` → best-effort classification from raw string
 
 What SourceRef is NOT:
@@ -76,6 +78,7 @@ Precedence rules (with standard registration):
 - Remote URI → COG only
 - STAC catalog item → STAC only
 - Database ref → PostGIS only
+- DuckDB ref → DuckDB only
 - Unknown → fallback connectors only (if any registered)
 
 What ConnectorRouter is NOT:
