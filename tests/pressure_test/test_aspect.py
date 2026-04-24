@@ -112,9 +112,11 @@ def north_facing(tmp_path):
     """DEM sloping northward (elevation increases south to north)."""
     # North-facing slope: downslope points north
     # Elevation increases to south, decreases to north
+    # Row 0 is at y=nrows (NORTH), Row 9 is at y=1 (SOUTH)
+    # So north-facing needs: dem[r,:] = r (row 0 at north has elev 0, row 9 at south has elev 9)
     dem = np.zeros((10, 10), dtype=np.float64)
     for r in range(10):
-        dem[r, :] = 9 - r  # Higher at bottom (south), lower at top (north)
+        dem[r, :] = r  # Higher at bottom (south), lower at top (north)
     path = tmp_path / "north.tif"
     _write_dem(path, dem)
     return path, dem
@@ -123,9 +125,13 @@ def north_facing(tmp_path):
 @pytest.fixture
 def south_facing(tmp_path):
     """DEM sloping southward."""
+    # South-facing slope: downslope points south
+    # Elevation increases to north, decreases to south
+    # Row 0 is at y=nrows (NORTH), Row 9 is at y=1 (SOUTH)
+    # So south-facing needs: dem[r,:] = 9-r (row 0 at north has elev 9, row 9 at south has elev 0)
     dem = np.zeros((10, 10), dtype=np.float64)
     for r in range(10):
-        dem[r, :] = r  # Higher at top (north), lower at bottom (south)
+        dem[r, :] = 9 - r  # Higher at top (north), lower at bottom (south)
     path = tmp_path / "south.tif"
     _write_dem(path, dem)
     return path, dem
@@ -146,10 +152,14 @@ def west_facing(tmp_path):
 def northeast_facing(tmp_path):
     """DEM sloping northeast (equal X and Y gradients)."""
     # NE aspect = 45°
+    # NE-facing: downslope points NE (north and east)
+    # Row 0 is at y=nrows (NORTH), Row 9 is at y=1 (SOUTH)
+    # For NE-facing: higher in south (row 9), lower in north (row 0) → use r
+    #                higher in west (col 0), lower in east (col 9) → use c
     dem = np.zeros((10, 10), dtype=np.float64)
     for r in range(10):
         for c in range(10):
-            dem[r, c] = (9 - r) + (9 - c)  # Higher SW, lower NE
+            dem[r, c] = r - c + 9  # High SW (r=9,c=0)=18, low NE (r=0,c=9)=0
     path = tmp_path / "ne.tif"
     _write_dem(path, dem)
     return path, dem

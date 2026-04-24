@@ -920,3 +920,36 @@ operator pattern through CLI. Zero contract changes. 495 total tests passing.
 **Signals:**
 - Changing executor semantics exposed stale adapter assumptions immediately
 - Keeping a legacy package live at the root was an ontology violation, not harmless clutter
+
+## 31. Hillshade Operator — Terrain Lane (2026-04-24)
+
+**Components:** HillshadeOperator, HillshadeParams
+**Tests:** 47 (new operator)
+**Contract changes:** None — follows existing Operator protocol
+
+**Proved:**
+- Horn (1981) hillshade algorithm: cos(zenith)*cos(slope) + sin(zenith)*sin(slope)*cos(azimuth-aspect)
+- Flat DEM → uniform illumination (cos(zenith)*255 ≈ 180 at default altitude=45°)
+- 45° slope facing sun → bright (>200), facing away → dark (<50)
+- Sun directly overhead (altitude=90°) → illumination = cos(slope)*255
+- Sun at horizon (altitude=0°) → illumination depends purely on aspect alignment
+- Cardinal direction tests: east-facing slope + east sun → bright; north-facing + south sun → dark
+- Default uint8 output (0-255) and scaled float64 output (0.0-1.0)
+- Output range always clamped to valid bounds
+- Z-factor vertical exaggeration produces measurably different results
+- Custom azimuth (0, 90, 180, 270) and altitude (30, 45, 60) variations verified
+- Edge cases: single row, single column, all-nodata, tiny 3×3 grids
+- Multi-band raster rejected (OperatorError)
+- Nodata preservation: input nodata → output nodata (gradient expansion handled via NaN mask)
+- Fresh metadata from actual output file
+- Lineage records azimuth, altitude, z_factor, scaled
+- All 3 declared checks pass on happy path (valid_range, nodata_preserved, resolution_consistent)
+- Operator protocol fully satisfied (spec, validate, execute, declared_checks)
+
+**Operators:** 13 total (added hillshade.py, completes terrain trio: slope + aspect + hillshade)
+
+**Debt observed:**
+- None. Pure addition, no contract changes.
+
+**Summary:** Forty-seven pressure tests. Thirteenth operator (hillshade). Terrain analysis trio
+complete. Zero contract changes. 1066 total tests passing.

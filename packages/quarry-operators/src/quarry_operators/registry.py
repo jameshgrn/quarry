@@ -23,6 +23,7 @@ _REGISTRY: tuple[tuple[str, str, str], ...] = (
     ("d8_flow_direction", "quarry_operators.d8_flow_direction", "D8FlowDirectionOperator"),
     ("fill_depressions", "quarry_operators.fill_depressions", "FillDepressionsOperator"),
     ("flow_accumulation", "quarry_operators.flow_accumulation", "FlowAccumulationOperator"),
+    ("hillshade", "quarry_operators.hillshade", "HillshadeOperator"),
     ("rasterize_vector", "quarry_operators.rasterize_vector", "RasterizeVectorOperator"),
     ("reproject", "quarry_operators.reproject", "ReprojectOperator"),
     ("sample_raster", "quarry_operators.sample_raster", "SampleRasterOperator"),

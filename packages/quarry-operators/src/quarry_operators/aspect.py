@@ -180,21 +180,22 @@ class AspectOperator:
             # Gradient (dz_dx, dz_dy) points in direction of steepest ASCENT
             # Aspect should point in direction of steepest DESCENT (opposite of gradient)
             #
-            # So downslope vector = (-dz_dx, -dz_dy)
-            # - where dz_dy is positive = slope goes UP to south, so downslope is NORTH
-            # - where dz_dx is positive = slope goes UP to east, so downslope is WEST
+            # The downslope vector in geographic (east, north) coordinates:
+            # - east component: -dz_dx (correct, column axis = east)
+            # - north component: dz_dy (NOT -dz_dy, because dz_dy = d(z)/d(south) and
+            #   the north component of downslope = -d(z)/d(north) = -(-dz_dy_south) = dz_dy)
             #
             # For arctan2(y, x): y is north component, x is east component
-            # y = -dz_dy (positive when downslope has north component)
+            # y = dz_dy (positive when downslope has north component)
             # x = -dz_dx (positive when downslope has east component)
-            # arctan2(-dz_dy, -dz_dx) gives aspect in math convention (0=E, CCW)
+            # arctan2(dz_dy, -dz_dx) gives aspect in math convention (0=E, CCW)
             # For compass (0=N, CW), we need to transform
 
             if params.convention == "compass":
                 # Compass: 0=N, 90=E, 180=S, 270=W, clockwise
-                # arctan2(-dz_dy, -dz_dx) gives math angle (0=E, CCW)
+                # arctan2(dz_dy, -dz_dx) gives math angle (0=E, CCW)
                 # Convert: compass = 90 - math, then normalize
-                aspect_rad = np.arctan2(-dz_dy, -dz_dx)
+                aspect_rad = np.arctan2(dz_dy, -dz_dx)
                 aspect = 90.0 - np.degrees(aspect_rad)
                 # Normalize to 0-360
                 aspect = np.where(aspect < 0, aspect + 360, aspect)
@@ -205,7 +206,7 @@ class AspectOperator:
                 aspect = np.where(flat_mask, params.flat_value, aspect)
             else:
                 # Math convention: 0=E, 90=N, 180=W, 270=S (CCW from east)
-                aspect_rad = np.arctan2(-dz_dy, -dz_dx)
+                aspect_rad = np.arctan2(dz_dy, -dz_dx)
                 aspect = np.degrees(aspect_rad)
                 aspect = np.where(aspect < 0, aspect + 360, aspect)
                 slope_magnitude = np.sqrt(dz_dx**2 + dz_dy**2)
@@ -372,7 +373,7 @@ class AspectOperator:
             results.append(
                 CheckResult(
                     check_name="nodata_preserved",
-                    state=ValidationState.WARNING,
+                    state=ValidationState.WARN,
                     message=(
                         f"Nodata mismatch: input={input_nodata_count}, output={output_nodata_count}"
                     ),

@@ -1,20 +1,24 @@
-"""SlopeOperator — compute surface slope from DEM.
+"""HillshadeOperator — compute hillshade from DEM.
 
 Lane: operator
 
-Terrain analysis operator. Calculates slope magnitude at each cell
-using elevation gradients. Standard GIS slope measure.
+Terrain analysis operator. Calculates shaded relief (hillshade) from a DEM
+using the Horn (1981) algorithm. Simulates illumination from a light source
+at specified azimuth and altitude angles.
 
 Accepts: one raster artifact (single-band DEM)
-Produces: one raster artifact (single-band slope)
-Checks: valid_range, nodata_preserved, resolution_consistency
+Produces: one raster artifact (single-band hillshade)
+Checks: valid_range, nodata_preserved, resolution_consistent
+
+Output:
+- Default: uint8 raster with values 0-255 (standard hillshade convention)
+- scaled=True: float64 raster with values 0.0-1.0
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
 
 import numpy as np
 from quarry_core.artifact import (
@@ -38,29 +42,43 @@ from quarry_core.operator import (
 
 
 @dataclass(frozen=True)
-class SlopeParams(OperatorParams):
-    """Parameters for slope calculation."""
+class HillshadeParams(OperatorParams):
+    """Parameters for hillshade calculation."""
 
     output_path: str = ""
-    # Output units for slope: degrees (0-90), percent (rise/run * 100),
-    # radians (0-π/2), or m_m (rise/run, dimensionless)
-    units: Literal["degrees", "percent", "radians", "m_m"] = "degrees"
+    # Sun azimuth in compass degrees (0=N, 90=E, 180=S, 270=W)
+    azimuth: float = 315.0  # Default NW
+    # Sun altitude in degrees above horizon (0-90)
+    altitude: float = 45.0
+    # Vertical exaggeration factor
+    z_factor: float = 1.0
     # Nodata value override (None = read from source)
     nodata: float | None = None
-    # Nodata value for output slope raster
-    output_nodata: float = -9999.0
+    # Nodata value for uint8 output (0 is standard)
+    output_nodata: float = 0.0
+    # If True, output 0.0-1.0 float64 instead of 0-255 uint8
+    scaled: bool = False
 
 
-class SlopeOperator:
-    """Compute surface slope from a DEM.
+class HillshadeOperator:
+    """Compute hillshade (shaded relief) from a DEM.
 
-    Uses central difference gradient estimation via numpy.gradient.
-    Handles CRS units correctly by using actual ground resolution.
+    Uses the Horn (1981) hillshade algorithm with central difference
+    gradient estimation. Simulates illumination from a directional
+    light source at specified azimuth and altitude angles.
+
+    Formula:
+        illumination = cos(zenith) * cos(slope) +
+                       sin(zenith) * sin(slope) * cos(azimuth - aspect)
+
+    Where:
+        zenith = π/2 - altitude (in radians)
+        azimuth is converted from compass to math convention
     """
 
     @property
     def name(self) -> str:
-        return "slope"
+        return "hillshade"
 
     @property
     def spec(self) -> OperatorSpec:
@@ -90,21 +108,27 @@ class SlopeOperator:
         if not artifact.is_materialized:
             errors.append("Input raster is not materialized (lazy handle)")
 
-        if not isinstance(params, SlopeParams):
-            errors.append("Params must be SlopeParams")
+        if not isinstance(params, HillshadeParams):
+            errors.append("Params must be HillshadeParams")
             return errors
 
         if not params.output_path:
             errors.append("output_path is required")
 
-        if params.units not in ("degrees", "percent", "radians", "m_m"):
-            errors.append(f"Invalid units: {params.units}")
+        if not (0 <= params.azimuth <= 360):
+            errors.append(f"azimuth must be 0-360, got {params.azimuth}")
+
+        if not (0 <= params.altitude <= 90):
+            errors.append(f"altitude must be 0-90, got {params.altitude}")
+
+        if params.z_factor <= 0:
+            errors.append(f"z_factor must be > 0, got {params.z_factor}")
 
         return errors
 
     def execute(self, inputs: list[Artifact], params: OperatorParams) -> OperatorResult:
-        if not isinstance(params, SlopeParams):
-            raise OperatorError(self.name, "Params must be SlopeParams")
+        if not isinstance(params, HillshadeParams):
+            raise OperatorError(self.name, "Params must be HillshadeParams")
 
         import rasterio
 
@@ -134,8 +158,6 @@ class SlopeOperator:
                 valid = ~np.isnan(dem)
 
             # Get cell dimensions from transform
-            # Transform is (a, b, c, d, e, f) where:
-            # a = pixel width, e = pixel height (usually negative)
             cell_width = abs(transform.a)
             cell_height = abs(transform.e)
 
@@ -146,56 +168,84 @@ class SlopeOperator:
                     inputs=[artifact.id],
                 )
 
-            # Calculate gradients using central differences
-            # Handle edge case: single row or single column
-            nrows, ncols = dem.shape
-            if nrows == 1:
-                # Single row: no Y gradient, only X gradient
-                dz_dx = np.gradient(dem, cell_width, axis=1)
-                dz_dy = np.zeros_like(dem)
-            elif ncols == 1:
-                # Single column: no X gradient, only Y gradient
-                dz_dy = np.gradient(dem, cell_height, axis=0)
-                dz_dx = np.zeros_like(dem)
-            else:
-                # Normal 2D gradient
-                # np.gradient returns derivatives in [y, x] order (row, col)
-                dz_dy, dz_dx = np.gradient(dem, cell_height, cell_width)
+            # Apply z_factor to elevation before gradient calculation
+            dem_scaled = dem * params.z_factor
 
-            # Slope magnitude: tan(slope) = sqrt(dz_dx^2 + dz_dy^2)
+            # Calculate gradients using central differences
+            nrows, ncols = dem_scaled.shape
+            if nrows == 1:
+                dz_dx = np.gradient(dem_scaled, cell_width, axis=1)
+                dz_dy = np.zeros_like(dem_scaled)
+            elif ncols == 1:
+                dz_dy = np.gradient(dem_scaled, cell_height, axis=0)
+                dz_dx = np.zeros_like(dem_scaled)
+            else:
+                dz_dy, dz_dx = np.gradient(dem_scaled, cell_height, cell_width)
+
+            # Compute slope in radians
+            # tan(slope) = sqrt(dz_dx^2 + dz_dy^2)
             slope_rad = np.arctan(np.sqrt(dz_dx**2 + dz_dy**2))
 
-            # Convert to requested units
-            if params.units == "radians":
-                slope = slope_rad
-            elif params.units == "degrees":
-                slope = np.degrees(slope_rad)
-            elif params.units == "percent":
-                slope = np.tan(slope_rad) * 100.0
-            else:  # m_m (rise/run, dimensionless)
-                slope = np.tan(slope_rad)
+            # Compute aspect (downslope direction) in radians (math convention: 0=E, CCW)
+            # dz_dy is d(z)/d(row) = d(z)/d(south), so the north component of
+            # the downslope vector is dz_dy (not -dz_dy).
+            # East component of downslope = -dz_dx.
+            aspect_rad = np.arctan2(dz_dy, -dz_dx)
 
-            # Apply nodata mask
-            slope[~valid] = params.output_nodata
+            # Convert sun angles
+            # Zenith angle: π/2 - altitude (altitude is elevation above horizon)
+            zenith_rad = np.pi / 2 - np.radians(params.altitude)
+
+            # Convert azimuth from compass to math convention
+            # Compass: 0=N, 90=E, 180=S, 270=W (clockwise from N)
+            # Math: 0=E, 90=N, 180=W, 270=S (counter-clockwise from E)
+            # Conversion: math_azimuth = 90 - compass_azimuth
+            azimuth_math_rad = np.radians(90.0 - params.azimuth)
+
+            # Horn (1981) hillshade formula
+            # illumination = cos(zenith) * cos(slope) +
+            #                sin(zenith) * sin(slope) * cos(azimuth - aspect)
+            illumination = np.cos(zenith_rad) * np.cos(slope_rad) + np.sin(zenith_rad) * np.sin(
+                slope_rad
+            ) * np.cos(azimuth_math_rad - aspect_rad)
+
+            # Clip to valid range [0, 1]
+            illumination = np.clip(illumination, 0.0, 1.0)
+
+            # Apply nodata mask — also catch NaN leaked by gradient near nodata cells
+            nan_mask = np.isnan(illumination)
+            illumination[~valid | nan_mask] = params.output_nodata
+
+            # Prepare output based on scaled parameter
+            if params.scaled:
+                # Output as float64 in range [0.0, 1.0]
+                hillshade = illumination
+                out_dtype = "float64"
+                out_nodata = params.output_nodata
+            else:
+                # Output as uint8 in range [0, 255]
+                hillshade = (illumination * 255).astype(np.uint8)
+                out_dtype = "uint8"
+                out_nodata = int(params.output_nodata)
 
             # Update metadata for output
             meta.update(
                 {
-                    "dtype": "float64",
-                    "nodata": params.output_nodata,
+                    "dtype": out_dtype,
+                    "nodata": out_nodata,
                 }
             )
 
             # Write output
             with rasterio.open(output_path, "w", **meta) as dst:
-                dst.write(slope, 1)
+                dst.write(hillshade, 1)
 
         except OperatorError:
             raise
         except Exception as e:
             raise OperatorError(
                 self.name,
-                f"Slope calculation failed: {e}",
+                f"Hillshade calculation failed: {e}",
                 inputs=[artifact.id],
             ) from e
 
@@ -226,7 +276,10 @@ class SlopeOperator:
                     operation=self.name,
                     inputs=(artifact.id,),
                     params={
-                        "units": params.units,
+                        "azimuth": params.azimuth,
+                        "altitude": params.altitude,
+                        "z_factor": params.z_factor,
+                        "scaled": params.scaled,
                         "nodata": nodata,
                         "output_nodata": params.output_nodata,
                     },
@@ -234,12 +287,14 @@ class SlopeOperator:
                 metadata={
                     "driver": out_src.driver,
                     "dtype": str(out_src.dtypes[0]),
-                    "units": params.units,
-                    "algorithm": "central_difference_gradient",
+                    "azimuth": params.azimuth,
+                    "altitude": params.altitude,
+                    "z_factor": params.z_factor,
+                    "algorithm": "horn_1981",
                 },
             )
 
-        checks = self._run_checks(output_artifact, slope, valid, params)
+        checks = self._run_checks(output_artifact, hillshade, valid, params)
         return OperatorResult(artifact=output_artifact, checks=checks)
 
     def declared_checks(self) -> list[str]:
@@ -248,26 +303,26 @@ class SlopeOperator:
     def _run_checks(
         self,
         output: Artifact,
-        slope: np.ndarray,
+        hillshade: np.ndarray,
         valid: np.ndarray,
-        params: SlopeParams,
+        params: HillshadeParams,
     ) -> list[CheckResult]:
         results = []
 
-        # Valid range check based on units
-        valid_slope = slope[valid]
-        if len(valid_slope) > 0:
-            min_val = valid_slope.min()
-            max_val = valid_slope.max()
+        # Valid range check
+        valid_hillshade = hillshade[valid]
+        if len(valid_hillshade) > 0:
+            min_val = valid_hillshade.min()
+            max_val = valid_hillshade.max()
 
-            if params.units == "degrees":
-                # Slope in degrees should be 0-90
-                if min_val >= 0 and max_val <= 90:
+            if params.scaled:
+                # Scaled output: 0.0-1.0
+                if min_val >= 0.0 and max_val <= 1.0:
                     results.append(
                         CheckResult(
                             check_name="valid_range",
                             state=ValidationState.VALID,
-                            message=f"Slope range: {min_val:.2f}° to {max_val:.2f}°",
+                            message=f"Hillshade range: {min_val:.4f} to {max_val:.4f} (scaled)",
                         )
                     )
                 else:
@@ -275,17 +330,17 @@ class SlopeOperator:
                         CheckResult(
                             check_name="valid_range",
                             state=ValidationState.INVALID,
-                            message=f"Slope out of range: {min_val:.2f}° to {max_val:.2f}°",
+                            message=f"Hillshade out of range: {min_val:.4f} to {max_val:.4f}",
                         )
                     )
-            elif params.units == "percent":
-                # Percent can be anything >= 0, just check non-negative
-                if min_val >= 0:
+            else:
+                # Standard output: 0-255
+                if min_val >= 0 and max_val <= 255:
                     results.append(
                         CheckResult(
                             check_name="valid_range",
                             state=ValidationState.VALID,
-                            message=f"Slope range: {min_val:.2f}% to {max_val:.2f}%",
+                            message=f"Hillshade range: {int(min_val)} to {int(max_val)} (uint8)",
                         )
                     )
                 else:
@@ -293,42 +348,7 @@ class SlopeOperator:
                         CheckResult(
                             check_name="valid_range",
                             state=ValidationState.INVALID,
-                            message=f"Negative slope values found: {min_val:.2f}%",
-                        )
-                    )
-            elif params.units == "radians":
-                if min_val >= 0 and max_val <= np.pi / 2:
-                    results.append(
-                        CheckResult(
-                            check_name="valid_range",
-                            state=ValidationState.VALID,
-                            message=f"Slope range: {min_val:.4f} to {max_val:.4f} rad",
-                        )
-                    )
-                else:
-                    results.append(
-                        CheckResult(
-                            check_name="valid_range",
-                            state=ValidationState.INVALID,
-                            message=f"Slope out of range: {min_val:.4f} to {max_val:.4f} rad",
-                        )
-                    )
-            else:  # m_m (rise/run, dimensionless)
-                # m/m can be any non-negative value (0 to theoretically infinity)
-                if min_val >= 0:
-                    results.append(
-                        CheckResult(
-                            check_name="valid_range",
-                            state=ValidationState.VALID,
-                            message=f"Slope range: {min_val:.4f} to {max_val:.4f} m/m",
-                        )
-                    )
-                else:
-                    results.append(
-                        CheckResult(
-                            check_name="valid_range",
-                            state=ValidationState.INVALID,
-                            message=f"Negative slope values found: {min_val:.4f} m/m",
+                            message=f"Hillshade out of range: {min_val} to {max_val}",
                         )
                     )
         else:
@@ -336,12 +356,15 @@ class SlopeOperator:
                 CheckResult(
                     check_name="valid_range",
                     state=ValidationState.INVALID,
-                    message="No valid slope pixels",
+                    message="No valid hillshade pixels",
                 )
             )
 
         # Nodata preserved check
-        output_nodata_mask = slope == params.output_nodata
+        if params.scaled:
+            output_nodata_mask = hillshade == params.output_nodata
+        else:
+            output_nodata_mask = hillshade == int(params.output_nodata)
         input_nodata_count = (~valid).sum()
         output_nodata_count = output_nodata_mask.sum()
 
