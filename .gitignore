@@ -33,6 +33,7 @@ venv/
 
 # Session
 HANDOVER.md
+.napkin.md
 
 # Test fixtures (binary)
 tests/fixtures/*.tif
