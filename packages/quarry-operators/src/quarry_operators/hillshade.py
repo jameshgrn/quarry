@@ -129,6 +129,11 @@ class HillshadeOperator:
                 f"output_nodata must be 0-255 for uint8 output, got {params.output_nodata}"
             )
 
+        if not params.scaled and params.output_nodata != int(params.output_nodata):
+            errors.append(
+                f"output_nodata must be an integer for uint8 output, got {params.output_nodata}"
+            )
+
         return errors
 
     def execute(self, inputs: list[Artifact], params: OperatorParams) -> OperatorResult:

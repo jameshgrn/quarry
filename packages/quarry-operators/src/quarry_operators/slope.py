@@ -7,7 +7,7 @@ using elevation gradients. Standard GIS slope measure.
 
 Accepts: one raster artifact (single-band DEM)
 Produces: one raster artifact (single-band slope)
-Checks: valid_range, nodata_preserved, resolution_consistency
+Checks: valid_range, nodata_preserved, resolution_consistent
 """
 
 from __future__ import annotations

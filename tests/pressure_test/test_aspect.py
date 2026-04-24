@@ -361,6 +361,8 @@ class TestDiagonalDirections:
         with rasterio.open(output) as src:
             aspect = src.read(1)
             interior = aspect[1:-1, 1:-1]
+            # atol=2.0°: central differences on a uniform plane are exact; residual
+            # error comes from boundary-affected gradient cells leaking into interior.
             np.testing.assert_allclose(interior, 45.0, atol=2.0)
 
 

@@ -924,13 +924,13 @@ operator pattern through CLI. Zero contract changes. 495 total tests passing.
 ## 31. Hillshade Operator — Terrain Lane (2026-04-24)
 
 **Components:** HillshadeOperator, HillshadeParams
-**Tests:** 47 (new operator)
+**Tests:** 51 (new operator)
 **Contract changes:** None — follows existing Operator protocol
 
 **Proved:**
 - Horn (1981) hillshade algorithm: cos(zenith)*cos(slope) + sin(zenith)*sin(slope)*cos(azimuth-aspect)
 - Flat DEM → uniform illumination (cos(zenith)*255 ≈ 180 at default altitude=45°)
-- 45° slope facing sun → bright (>200), facing away → dark (<50)
+- 45° slope facing sun → bright (>240), facing away → dark (<20)
 - Sun directly overhead (altitude=90°) → illumination = cos(slope)*255
 - Sun at horizon (altitude=0°) → illumination depends purely on aspect alignment
 - Cardinal direction tests: east-facing slope + east sun → bright; north-facing + south sun → dark
@@ -951,5 +951,5 @@ operator pattern through CLI. Zero contract changes. 495 total tests passing.
 **Debt observed:**
 - None. Pure addition, no contract changes.
 
-**Summary:** Forty-seven pressure tests. Thirteenth operator (hillshade). Terrain analysis trio
-complete. Zero contract changes. 1066 total tests passing.
+**Summary:** Fifty-one pressure tests. Thirteenth operator (hillshade). Terrain analysis trio
+complete. Zero contract changes.

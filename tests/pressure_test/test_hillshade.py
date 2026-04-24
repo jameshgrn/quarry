@@ -299,6 +299,15 @@ class TestValidation:
         )
         assert any("output_nodata" in e for e in errors)
 
+    def test_validate_noninteger_output_nodata_uint8(self, op, flat_dem):
+        """Non-integer output_nodata rejected for uint8 output."""
+        path, _ = flat_dem
+        art = _make_artifact(path)
+        errors = op.validate_inputs(
+            [art], HillshadeParams(output_path="/tmp/x.tif", output_nodata=127.5)
+        )
+        assert any("integer" in e.lower() for e in errors)
+
     def test_accepts_valid_input(self, op, flat_dem):
         path, _ = flat_dem
         art = _make_artifact(path)
@@ -352,7 +361,8 @@ class TestSlopedSurfaces:
             interior = hillshade[1:-1, 1:-1]
             valid = interior != params.output_nodata
             # Should be near maximum (255) since slope faces sun
-            assert np.all(interior[valid] > 200)
+            # Horn formula: cos(45°)*cos(45°) + sin(45°)*sin(45°)*cos(0°) = 0.5 + 0.5 = 1.0 → 255
+            assert np.all(interior[valid] > 240)
 
     def test_45_degree_slope_facing_away(self, op, west_facing_slope, tmp_path):
         """45° slope facing away from sun should produce near-minimum illumination."""
@@ -369,7 +379,8 @@ class TestSlopedSurfaces:
             interior = hillshade[1:-1, 1:-1]
             valid = interior != params.output_nodata
             # Should be near minimum (0) since slope faces away from sun
-            assert np.all(interior[valid] < 50)
+            # Horn formula: cos(45°)*cos(45°) + sin(45°)*sin(45°)*cos(180°) = 0.5 - 0.5 = 0.0 → 0
+            assert np.all(interior[valid] < 20)
 
     def test_sun_directly_overhead(self, op, inclined_plane_45, tmp_path):
         """Sun at altitude=90° (zenith=0°) → illumination = cos(slope)*255 regardless of aspect."""
@@ -425,7 +436,8 @@ class TestSlopedSurfaces:
             hillshade = src.read(1)
             interior = hillshade[1:-1, 1:-1]
             valid = interior != params.output_nodata
-            assert np.all(interior[valid] > 200)
+            # Horn formula: cos(45°)*cos(45°) + sin(45°)*sin(45°)*cos(0°) = 1.0 → 255
+            assert np.all(interior[valid] > 240)
 
     def test_north_facing_slope_south_sun(self, op, north_facing_slope, tmp_path):
         """North-facing slope with sun from south (azimuth=180°) → low illumination."""
@@ -442,7 +454,8 @@ class TestSlopedSurfaces:
             interior = hillshade[1:-1, 1:-1]
             valid = interior != params.output_nodata
             # Should be relatively dark since slope faces away from sun
-            assert np.all(interior[valid] < 100)
+            # Horn formula: cos(45°)*cos(45°) + sin(45°)*sin(45°)*cos(180°) = 0.5 - 0.5 = 0.0 → 0
+            assert np.all(interior[valid] < 20)
 
     def test_south_facing_slope_south_sun(self, op, south_facing_slope, tmp_path):
         """South-facing slope with sun from south (azimuth=180°) → high illumination."""
@@ -459,7 +472,8 @@ class TestSlopedSurfaces:
             interior = hillshade[1:-1, 1:-1]
             valid = interior != params.output_nodata
             # Should be bright since slope faces the sun
-            assert np.all(interior[valid] > 200)
+            # Horn formula: cos(45°)*cos(45°) + sin(45°)*sin(45°)*cos(0°) = 0.5 + 0.5 = 1.0 → 255
+            assert np.all(interior[valid] > 240)
 
 
 # ---------------------------------------------------------------------------
@@ -606,6 +620,8 @@ class TestEdgeCases:
             hillshade = src.read(1)
             # Center cell should have valid value
             assert hillshade[1, 1] != params.output_nodata
+            # East-facing plane with sun from east at 45°: expect bright center
+            assert hillshade[1, 1] > 240
 
     def test_multiband_rejected(self, op, tmp_path):
         """Multi-band raster should raise OperatorError."""
@@ -664,7 +680,7 @@ class TestParameterVariations:
 
     @pytest.mark.parametrize("azimuth", [0.0, 90.0, 180.0, 270.0])
     def test_custom_azimuth(self, op, east_facing_slope, tmp_path, azimuth):
-        """Different azimuths should produce different results on sloped surface."""
+        """Different azimuths produce measurably different illumination on sloped surface."""
         path, _ = east_facing_slope
         art = _make_artifact(path)
         output = tmp_path / f"hillshade_az{azimuth}.tif"
@@ -672,6 +688,18 @@ class TestParameterVariations:
 
         result = op.execute([art], params)
         assert result.artifact is not None
+
+        with rasterio.open(output) as src:
+            hillshade = src.read(1)
+            interior = hillshade[1:-1, 1:-1]
+            # No actual nodata in this DEM, so compute mean over all interior pixels
+            mean_val = float(np.mean(interior))
+            # East-facing slope: azimuth=90 (sun from east) should be brightest
+            if azimuth == 90.0:
+                assert mean_val > 240
+            # azimuth=270 (sun from west, opposite to slope) should be darkest
+            elif azimuth == 270.0:
+                assert mean_val < 20
 
     @pytest.mark.parametrize("altitude", [30.0, 45.0, 60.0])
     def test_custom_altitude(self, op, flat_dem, tmp_path, altitude):
