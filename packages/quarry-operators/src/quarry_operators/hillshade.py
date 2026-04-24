@@ -124,6 +124,11 @@ class HillshadeOperator:
         if params.z_factor <= 0:
             errors.append(f"z_factor must be > 0, got {params.z_factor}")
 
+        if not params.scaled and not (0 <= params.output_nodata <= 255):
+            errors.append(
+                f"output_nodata must be 0-255 for uint8 output, got {params.output_nodata}"
+            )
+
         return errors
 
     def execute(self, inputs: list[Artifact], params: OperatorParams) -> OperatorResult:
@@ -136,6 +141,8 @@ class HillshadeOperator:
         input_path = artifact.backing.uri
         output_path = Path(params.output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        nodata: float | None = None
 
         try:
             with rasterio.open(input_path) as src:
@@ -168,8 +175,11 @@ class HillshadeOperator:
                     inputs=[artifact.id],
                 )
 
-            # Apply z_factor to elevation before gradient calculation
-            dem_scaled = dem * params.z_factor
+            # Mask nodata cells to NaN before scaling so gradient computation
+            # produces NaN (caught later) instead of wrong values from scaled nodata
+            dem_work = dem.copy()
+            dem_work[~valid] = np.nan
+            dem_scaled = dem_work * params.z_factor
 
             # Calculate gradients using central differences
             nrows, ncols = dem_scaled.shape

@@ -361,7 +361,7 @@ class TestDiagonalDirections:
         with rasterio.open(output) as src:
             aspect = src.read(1)
             interior = aspect[1:-1, 1:-1]
-            np.testing.assert_allclose(interior, 45.0, atol=10.0)
+            np.testing.assert_allclose(interior, 45.0, atol=2.0)
 
 
 # ---------------------------------------------------------------------------

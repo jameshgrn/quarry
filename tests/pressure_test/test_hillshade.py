@@ -283,6 +283,22 @@ class TestValidation:
         )
         assert any("z_factor" in e.lower() for e in errors)
 
+    def test_validate_azimuth_360_boundary(self, op, flat_dem):
+        """azimuth=360 is valid (equivalent to 0=North)."""
+        path, _ = flat_dem
+        art = _make_artifact(path)
+        errors = op.validate_inputs([art], HillshadeParams(output_path="/tmp/x.tif", azimuth=360.0))
+        assert errors == []
+
+    def test_validate_invalid_output_nodata_uint8(self, op, flat_dem):
+        """output_nodata outside 0-255 range rejected for uint8 output."""
+        path, _ = flat_dem
+        art = _make_artifact(path)
+        errors = op.validate_inputs(
+            [art], HillshadeParams(output_path="/tmp/x.tif", output_nodata=256.0)
+        )
+        assert any("output_nodata" in e for e in errors)
+
     def test_accepts_valid_input(self, op, flat_dem):
         path, _ = flat_dem
         art = _make_artifact(path)
@@ -391,11 +407,10 @@ class TestSlopedSurfaces:
             hillshade = src.read(1)
             interior = hillshade[1:-1, 1:-1]
             valid = interior != params.output_nodata
-            # With sun at horizon, slope facing sun should get max illumination
-            # cos(zenith) = cos(90°) = 0, sin(zenith) = sin(90°) = 1
+            # With sun at horizon (altitude=0°): zenith=90°, cos(z)=0, sin(z)=1
             # illumination = sin(slope) * cos(azimuth - aspect)
-            # For slope facing sun directly, this should be high
-            assert np.all(interior[valid] > 150)
+            # For 45° slope facing sun directly: sin(45°)*cos(0) ≈ 0.707 → uint8 ≈ 180
+            assert np.all(interior[valid] > 170)
 
     def test_east_facing_slope_east_sun(self, op, east_facing_slope, tmp_path):
         """East-facing slope with sun from east → high illumination."""
