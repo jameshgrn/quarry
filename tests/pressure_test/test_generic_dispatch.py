@@ -3,7 +3,7 @@
 Lane: adapter
 
 Exercises:
-  - Operator registry: all 12 names registered, name↔class match, lazy import
+  - Operator registry: all 17 names registered, name↔class match, lazy import
   - Param coercion: str, int, float, bool, Optional, list, tuple, Literal
   - Generic dispatch end-to-end: slope, zonal_stats, rasterize_vector, reproject,
     spatial_join, build_cog, clip_raster
