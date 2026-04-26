@@ -35,7 +35,20 @@ if TYPE_CHECKING:
 
 
 RASTER_EXTENSIONS = {".tif", ".tiff", ".geotiff", ".jp2", ".hgt", ".nc", ".vrt"}
-VECTOR_EXTENSIONS = {".shp", ".geojson", ".gpkg", ".kml", ".gml", ".fgb", ".parquet"}
+VECTOR_EXTENSIONS = {
+    ".shp",
+    ".geojson",
+    ".gpkg",
+    ".kml",
+    ".kmz",
+    ".gml",
+    ".fgb",
+    ".parquet",
+    ".gpx",
+    ".geojsonl",
+    ".geojsonseq",
+    ".ndjson",
+}
 
 
 class LocalFileConnector:

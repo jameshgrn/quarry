@@ -3,7 +3,7 @@
 Lane: adapter
 
 Exercises:
-  - Operator registry: all 12 names registered, name↔class match, lazy import
+  - Operator registry: all 17 names registered, name↔class match, lazy import
   - Param coercion: str, int, float, bool, Optional, list, tuple, Literal
   - Generic dispatch end-to-end: slope, zonal_stats, rasterize_vector, reproject,
     spatial_join, build_cog, clip_raster
@@ -145,8 +145,8 @@ def polygons_path(workspace):
 
 
 class TestOperatorRegistry:
-    def test_all_thirteen_names_registered(self):
-        assert len(OPERATOR_NAMES) == 13
+    def test_all_operator_names_registered(self):
+        assert len(OPERATOR_NAMES) == 17
 
     def test_operator_names_match_classes(self):
         for name in OPERATOR_NAMES:

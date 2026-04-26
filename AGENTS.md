@@ -74,8 +74,8 @@ Trimmed 2026-04-23: all dead reports, analysis scripts, demo scripts, CSV/JSON d
 ## Current status
 
 Substrate phase is complete. The current surface:
-- 5 connectors: LocalFile, STAC, PostGIS, COG, DuckDB
-- 12 operators: ClipRaster, Reproject, FillDepressions, Slope, Aspect, D8FlowDirection, FlowAccumulation, ZonalStats, SpatialJoin, BuildCOG, SampleRaster, RasterizeVector
+- 24 connectors: LocalFile, COG, STAC, PostGIS, DuckDB, GeoPackage, Shapefile, FlatGeobuf, GeoParquet, GeoJSONSeq, TopoJSON, CSVXY, ExcelXY, GPX, KMZ, LAS, MBTiles, NetCDF, Zarr, SpatiaLite, ObjectStore, OGCServices, OpenTopography, Overture
+- 17 operators: ClipRaster, Reproject, FillDepressions, Slope, Aspect, Hillshade, D8FlowDirection, FlowAccumulation, ZonalStats, SpatialJoin, BuildCOG, SampleRaster, RasterizeVector, Buffer, Dissolve, ClipVector, Simplify
 - 1 flow: HydrologyFlow (fill→D8→accumulation)
 - 1 executor: LocalExecutor
 - ConnectorRouter for source-ref-based connector selection

@@ -89,15 +89,15 @@ just tree          # Show package dependency graph
 - CLI exposes hydrology + zonal + sample + rasterize flows — generic operator dispatch deferred
 - CLI plain text output only — JSON mode deferred until needed
 - Operator string params (`compress`, `resampling`, `predicate`) validated against hardcoded tuples — `Literal` types deferred (large surface area)
-- `HydrologyFlow._execute_step` mutates input lists AND returns a value — mixed contract, single caller, low urgency
+- DissolveOperator mixed Polygon/MultiPolygon across groups causes fiona schema mismatch — needs geometry promotion before write
 - `artifact.metadata` duplicates `spatial` keys (`crs`, `extent`, `band_count`) across all connectors — strip banned keys, enforce 3-way split: `spatial` (typed contract), `metadata` (connector-specific extras), `lineage.params` (execution provenance). Phase: ban new consumers → strip keys → enforce via constructor validation
 
 ## Substrate Phase — COMPLETE
 
 Substrate phase is complete. All criteria met:
 - Core ontology stable across the pressure surface
-- 5 connectors: LocalFile, STAC, PostGIS, COG, DuckDB
-- 13 operators: ClipRaster, Reproject, FillDepressions, Slope, Aspect, Hillshade, D8FlowDirection, FlowAccumulation, ZonalStats, SpatialJoin, BuildCOG, SampleRaster, RasterizeVector
+- 24 connectors: LocalFile, COG, STAC, PostGIS, DuckDB, GeoPackage, Shapefile, FlatGeobuf, GeoParquet, GeoJSONSeq, TopoJSON, CSVXY, ExcelXY, GPX, KMZ, LAS, MBTiles, NetCDF, Zarr, SpatiaLite, ObjectStore, OGCServices, OpenTopography, Overture
+- 17 operators: ClipRaster, Reproject, FillDepressions, Slope, Aspect, Hillshade, D8FlowDirection, FlowAccumulation, ZonalStats, SpatialJoin, BuildCOG, SampleRaster, RasterizeVector, Buffer, Dissolve, ClipVector, Simplify
 - Registry persists artifacts/runs/checks/lineage
 - End-to-end flow works (HydrologyFlow + zonal stats + COG export)
 - Use `just stats` for current collected test counts
@@ -108,7 +108,7 @@ Substrate phase is complete. All criteria met:
 - Docs refreshed: AGENTS.md, CONTRACTS.md, REPO_MAP.md current with actual state
 - No new contracts, operators, or connectors — consolidation only
 
-## v0.3.0 Milestone — CLI Adapter
+## v0.3.0 Milestone — CLI Adapter — COMPLETE
 
 - `quarry-cli` package: minimal CLI invocation surface (lane: adapter)
 - Commands: `quarry artifacts list/show`, `quarry lineage`, `quarry runs list/show`, `quarry checks show`, `quarry run hydrology`, `quarry run zonal`, `quarry run sample`, `quarry run rasterize`
