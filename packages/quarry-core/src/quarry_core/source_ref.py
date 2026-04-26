@@ -52,8 +52,29 @@ RASTER_EXTENSIONS = {
     ".h5",
     ".hdf5",
     ".hdf",
+    ".mbtiles",
+    ".zarr",
 }
-VECTOR_EXTENSIONS = {".shp", ".geojson", ".gpkg", ".kml", ".gml", ".fgb", ".parquet", ".geoparquet"}
+VECTOR_EXTENSIONS = {
+    ".shp",
+    ".geojson",
+    ".gpkg",
+    ".kml",
+    ".kmz",
+    ".gml",
+    ".fgb",
+    ".parquet",
+    ".geoparquet",
+    ".gpx",
+    ".geojsonl",
+    ".geojsonseq",
+    ".topojson",
+    ".las",
+    ".laz",
+    ".sqlite",
+    ".spatialite",
+    ".ndjson",
+}
 
 
 def _freeze_value(value: Any) -> Any:
