@@ -19,6 +19,7 @@ quarry-cli = { workspace = true }
 dev = [
     "matplotlib>=3.10.8",
     "netcdf4>=1.7.3",
+    "openpyxl>=3.1.5",
     "pillow>=12.2.0",
     "pyarrow>=14.0.0",
     "pytest>=7.0.0",
