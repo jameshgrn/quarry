@@ -145,8 +145,8 @@ def polygons_path(workspace):
 
 
 class TestOperatorRegistry:
-    def test_all_thirteen_names_registered(self):
-        assert len(OPERATOR_NAMES) == 13
+    def test_all_operator_names_registered(self):
+        assert len(OPERATOR_NAMES) == 17
 
     def test_operator_names_match_classes(self):
         for name in OPERATOR_NAMES:

@@ -24,13 +24,32 @@ quarry/                          # Monorepo root
 │   │       └── executors/
 │   │           └── local.py     # LocalExecutor (synchronous, in-process)
 │   │
-│   ├── quarry-connectors/       # Deps: rasterio, fiona, pystac-client, psycopg, shapely
+│   ├── quarry-connectors/       # Deps: rasterio, fiona, pystac-client, psycopg, shapely, duckdb, ...
 │   │   └── src/quarry_connectors/
 │   │       ├── local_file.py    # LocalFileConnector (raster + vector, eager + lazy)
+│   │       ├── cog.py           # COGConnector (local/remote COG, validation, I/O metrics)
 │   │       ├── stac.py          # STACConnector (catalog search, asset selection, lazy/eager)
 │   │       ├── postgis.py       # PostGISConnector (schema.table, queries, geometry/non-geometry)
-│   │       ├── cog.py           # COGConnector (local/remote COG, validation, I/O metrics)
-│   │       └── duckdb_connector.py # DuckDBConnector (path.duckdb::table, geometry/non-geometry)
+│   │       ├── duckdb_connector.py # DuckDBConnector (path.duckdb::table, geometry/non-geometry)
+│   │       ├── geopackage.py    # GeoPackageConnector (GPKG layers)
+│   │       ├── shapefile.py     # ShapefileConnector (.shp/.shx/.dbf bundle)
+│   │       ├── flatgeobuf.py    # FlatGeobufConnector (.fgb vector)
+│   │       ├── geoparquet.py    # GeoParquetConnector (columnar vector/geometry)
+│   │       ├── geojsonseq.py    # GeoJSONSeqConnector (newline-delimited GeoJSON)
+│   │       ├── topojson.py      # TopoJSONConnector (topology-encoded vector)
+│   │       ├── csv_xy.py        # CSVXYConnector (CSV with X/Y coordinate columns)
+│   │       ├── excel_xy.py      # ExcelXYConnector (Excel with X/Y coordinate columns)
+│   │       ├── gpx.py           # GPXConnector (GPS exchange format)
+│   │       ├── kmz.py           # KMZConnector (KML/KMZ archives)
+│   │       ├── las.py           # LASPointCloudConnector (LiDAR point clouds)
+│   │       ├── mbtiles.py       # MBTilesConnector (map tile packages)
+│   │       ├── netcdf.py        # NetCDFConnector (multidimensional arrays)
+│   │       ├── zarr_connector.py # ZarrConnector (chunked array storage)
+│   │       ├── spatialite.py    # SpatiaLiteConnector (SQLite + spatial)
+│   │       ├── object_store.py  # ObjectStoreConnector (S3/GCS/Azure blob)
+│   │       ├── ogc_services.py  # OGCServicesConnector (WMS/WFS/WCS)
+│   │       ├── opentopography.py # OpenTopographyConnector (DEM API)
+│   │       └── overture.py      # OvertureConnector (Overture Maps)
 │   │
 │   ├── quarry-operators/        # Deps: rasterio, fiona, shapely
 │   │   └── src/quarry_operators/
@@ -39,13 +58,18 @@ quarry/                          # Monorepo root
 │   │       ├── fill_depressions.py  # FillDepressionsOperator (Priority-Flood DEM preprocessing)
 │   │       ├── slope.py             # SlopeOperator (terrain slope from DEM)
 │   │       ├── aspect.py            # AspectOperator (terrain aspect from DEM)
+│   │       ├── hillshade.py         # HillshadeOperator (illumination from DEM)
 │   │       ├── d8_flow_direction.py # D8FlowDirectionOperator (steepest descent + flat resolution)
 │   │       ├── flow_accumulation.py # FlowAccumulationOperator (toposort upstream area)
 │   │       ├── zonal_stats.py       # ZonalStatsOperator (raster+vector → per-zone CSV stats)
 │   │       ├── spatial_join.py      # SpatialJoinOperator (vector×vector left join, intersects)
 │   │       ├── sample_raster.py     # SampleRasterOperator (raster+points → per-point CSV values)
-│   │       ├── rasterize_vector.py   # RasterizeVectorOperator (vector polygons → raster grid)
-│   │       ├── build_cog.py        # BuildCOGOperator (raster → COG normalization)
+│   │       ├── rasterize_vector.py  # RasterizeVectorOperator (vector polygons → raster grid)
+│   │       ├── build_cog.py         # BuildCOGOperator (raster → COG normalization)
+│   │       ├── buffer.py            # BufferOperator (vector geometry buffer by distance)
+│   │       ├── dissolve.py          # DissolveOperator (merge features by attribute)
+│   │       ├── clip_vector.py       # ClipVectorOperator (clip features to mask boundary)
+│   │       ├── simplify.py          # SimplifyOperator (Douglas-Peucker simplification)
 │   │       ├── checks.py           # Standalone checks (InternalOutletCount)
 │   │       └── hydrology_flow.py   # HydrologyFlow (fill→D8→accumulation chain)
 │   │
@@ -58,7 +82,7 @@ quarry/                          # Monorepo root
 │           └── main.py          # argparse CLI: artifacts list/show, lineage, run hydrology/zonal
 │
 ├── tests/
-│   ├── pressure_test/           # Substrate pressure tests (652 tests, 30 suites)
+│   ├── pressure_test/           # Substrate pressure tests (1601 tests)
 │   │   ├── conftest.py          # PYTHONPATH setup for dev
 │   │   ├── test_end_to_end.py   # Kernel: connector → operator → executor (15)
 │   │   ├── test_registry.py     # Registry round-trips (18)
@@ -88,6 +112,8 @@ quarry/                          # Monorepo root
 │   │   ├── test_cli_rasterize.py # CLI adapter: run rasterize end-to-end (26)
 │   │   ├── test_router_integration.py # ConnectorRouter integration across all connectors (15)
 │   │   └── test_duckdb_connector.py # DuckDB connector: table/query/spatial/lazy/discover (42)
+│   │   ├── test_hillshade.py        # Hillshade illumination op (51)
+│   │   └── test_*.py               # + connector pressure tests (24 connectors)
 │   └── fixtures/                # Test data (gitignored binaries)
 │
 ├── examples/
@@ -103,7 +129,7 @@ quarry/                          # Monorepo root
 ```
 quarry-core (zero deps)
   ↑
-quarry-connectors (+ rasterio, fiona, pystac-client, psycopg, shapely, duckdb)
+quarry-connectors (+ rasterio, fiona, pystac-client, psycopg, shapely, duckdb, ...)
 quarry-operators  (+ rasterio, fiona, shapely)
 quarry-registry   (+ duckdb)
   ↑
