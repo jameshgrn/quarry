@@ -288,13 +288,8 @@ class SLCConnector:
                 uri=str(path),
             ),
             spatial=SpatialDescriptor(
-                crs="EPSG:4326",  # Geographic bounds from metadata
-                extent=(
-                    metadata.lon_bounds[0],
-                    metadata.lat_bounds[0],
-                    metadata.lon_bounds[1],
-                    metadata.lat_bounds[1],
-                ),
+                crs=None,  # Radar geometry — slant-range/azimuth, not geographic
+                extent=(0, 0, metadata.num_pixels, metadata.num_lines),
                 resolution=(metadata.range_spacing, metadata.azimuth_resolution),
                 band_count=2,  # plus_y and minus_y
             ),
@@ -306,6 +301,11 @@ class SLCConnector:
                 "swath": metadata.swath_side,
                 "transmit": metadata.transmit_antenna,
                 "wavelength_m": metadata.wavelength,
+                "geographic_bounds": {
+                    "crs": "EPSG:4326",
+                    "lat_bounds": metadata.lat_bounds,
+                    "lon_bounds": metadata.lon_bounds,
+                },
             },
         )
 
@@ -321,13 +321,8 @@ class SLCConnector:
                 content_hash=content_hash(path),
             ),
             spatial=SpatialDescriptor(
-                crs="EPSG:4326",
-                extent=(
-                    metadata.lon_bounds[0],
-                    metadata.lat_bounds[0],
-                    metadata.lon_bounds[1],
-                    metadata.lat_bounds[1],
-                ),
+                crs=None,  # Radar geometry — slant-range/azimuth, not geographic
+                extent=(0, 0, metadata.num_pixels, metadata.num_lines),
                 resolution=(metadata.range_spacing, metadata.azimuth_resolution),
                 band_count=2,
             ),
@@ -337,6 +332,11 @@ class SLCConnector:
                 "format": "hdf5",
                 "cycle": metadata.cycle,
                 "pass": metadata.pass_number,
+                "geographic_bounds": {
+                    "crs": "EPSG:4326",
+                    "lat_bounds": metadata.lat_bounds,
+                    "lon_bounds": metadata.lon_bounds,
+                },
             },
         )
 
