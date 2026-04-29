@@ -141,7 +141,7 @@ def test_satisfies_connector_protocol():
 
 
 def test_band_catalog_completeness():
-    """All 13 Sentinel-2 bands should be in the catalog."""
+    """All 13 Sentinel-2 bands + SCL should be in the catalog."""
     expected_bands = {
         "B01",
         "B02",
@@ -153,6 +153,7 @@ def test_band_catalog_completeness():
         "B08",
         "B8A",
         "B09",
+        "B10",
         "B11",
         "B12",
         "SCL",
@@ -366,3 +367,35 @@ def test_discover_string_query():
 
     call_args = mock.call_args[0][0]
     assert call_args["datetime"] == "2024-01-01/2024-01-31"
+
+
+# ---------------------------------------------------------------------------
+# Metadata (mocked STAC)
+# ---------------------------------------------------------------------------
+
+
+def test_metadata_enriches_with_band_info():
+    conn = Sentinel2Connector()
+    mock_meta = {
+        "item_id": "S2A_T10SEG_20240101",
+        "collection": "sentinel-2-l2a",
+        "bbox": [-122.5, 37.0, -122.0, 37.5],
+        "datetime": "2024-01-01T10:30:00Z",
+        "properties": {"eo:cloud_cover": 5.2},
+        "asset_key": "red",
+        "asset_href": "https://example.com/red.tif",
+        "asset_media_type": "image/tiff",
+        "asset_roles": ["data"],
+        "all_asset_keys": ["blue", "green", "red", "nir", "scl"],
+        "stac_extensions": [],
+    }
+
+    with patch.object(conn._stac, "metadata", return_value=mock_meta):
+        meta = conn.metadata("item123::red")
+
+    assert meta["source"] == "sentinel2"
+    assert meta["band_id"] == "B04"
+    assert meta["wavelength_nm"] == 665
+    assert meta["gsd_m"] == 10
+    assert "blue" in meta["available_bands"]
+    assert meta["available_bands"]["red"] == "B04"

@@ -43,6 +43,7 @@ _S2_BANDS: dict[str, tuple[str, str, int, int]] = {
     "nir": ("B08", "nir", 842, 10),
     "nir08": ("B8A", "nir08", 865, 20),
     "nir09": ("B09", "nir09", 945, 60),
+    "cirrus": ("B10", "cirrus", 1375, 60),
     "swir16": ("B11", "swir16", 1610, 20),
     "swir22": ("B12", "swir22", 2190, 20),
     "scl": ("SCL", "scl", 0, 20),
