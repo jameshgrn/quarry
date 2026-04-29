@@ -263,6 +263,35 @@ def test_materialize_unknown_band(tmp_path: Path):
         conn.materialize("item123::bogus", tmp_path)
 
 
+def test_materialize_requires_band(tmp_path: Path):
+    from quarry_core.connector import MaterializeError
+
+    conn = Sentinel2Connector()
+    with pytest.raises(MaterializeError, match="Band key required"):
+        conn.materialize("item123", tmp_path)
+
+
+def test_materialize_spatial_resolution_matches_band(tmp_path: Path):
+    conn = Sentinel2Connector()
+    # Mock a 20m band — spatial resolution should be overridden to (20, 20)
+    mock_result = _mock_stac_materialize_result(tmp_path, "rededge1")
+
+    with patch.object(conn._stac, "materialize", return_value=mock_result):
+        result = conn.materialize("item123::rededge1", tmp_path)
+
+    assert result.artifact.spatial.resolution == (20.0, 20.0)
+    assert result.artifact.spatial.band_count == 1
+    assert result.artifact.metadata["gsd_m"] == 20
+
+
+def test_metadata_unknown_band_raises():
+    from quarry_core.connector import MaterializeError
+
+    conn = Sentinel2Connector()
+    with pytest.raises(MaterializeError, match="Unknown band"):
+        conn.metadata("item123::bogus")
+
+
 # ---------------------------------------------------------------------------
 # Discover (mocked STAC)
 # ---------------------------------------------------------------------------

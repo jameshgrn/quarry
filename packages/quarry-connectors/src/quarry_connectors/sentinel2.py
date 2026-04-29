@@ -14,7 +14,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from quarry_core.artifact import Artifact
+from quarry_core.artifact import Artifact, SpatialDescriptor
 from quarry_core.connector import (
     CatalogEntry,
     ConnectorCapability,
@@ -93,6 +93,8 @@ class Sentinel2Connector:
     ) -> MaterializeResult:
         """Materialize a single Sentinel-2 band as an artifact.
 
+        Band key is required — one artifact per band.
+
         source_ref formats:
             "item_id::blue"          — by STAC asset key
             "item_id::B04"           — by Sentinel-2 band ID
@@ -100,44 +102,52 @@ class Sentinel2Connector:
         """
         stac_ref, asset_key = self._parse_source_ref(source_ref)
 
-        # Resolve band ID to STAC asset key
-        resolved_key = self._resolve_band(asset_key) if asset_key else None
-        if resolved_key is None and asset_key is not None:
+        if asset_key is None:
+            raise MaterializeError(
+                source_ref,
+                "Band key required. Use 'item_id::band' format. "
+                f"Available: {list(_S2_BANDS.keys())} or {list(_BAND_TO_ASSET.keys())}",
+            )
+
+        resolved_key = self._resolve_band(asset_key)
+        if resolved_key is None:
             raise MaterializeError(
                 source_ref,
                 f"Unknown band '{asset_key}'. "
                 f"Available: {list(_S2_BANDS.keys())} or {list(_BAND_TO_ASSET.keys())}",
             )
 
-        # Build full STAC source_ref
-        full_ref = f"{stac_ref}::{resolved_key}" if resolved_key else stac_ref
-
+        # Delegate to STACConnector
+        full_ref = f"{stac_ref}::{resolved_key}"
         result = self._stac.materialize(full_ref, workspace, lazy=lazy)
 
-        # Enrich with Sentinel-2 band metadata
-        band_info = _S2_BANDS.get(resolved_key or "", None)
+        # Enrich with Sentinel-2 band metadata + correct spatial resolution
+        band_id, common_name, wavelength, gsd = _S2_BANDS[resolved_key]
+
         enriched_metadata = {
             **dict(result.artifact.metadata),
             "source": "sentinel2",
+            "band_id": band_id,
+            "common_name": common_name,
+            "wavelength_nm": wavelength,
+            "gsd_m": gsd,
         }
-        if band_info:
-            band_id, common_name, wavelength, gsd = band_info
-            enriched_metadata.update(
-                {
-                    "band_id": band_id,
-                    "common_name": common_name,
-                    "wavelength_nm": wavelength,
-                    "gsd_m": gsd,
-                }
-            )
 
+        # Override spatial resolution with band-specific GSD
         a = result.artifact
+        band_spatial = SpatialDescriptor(
+            crs=a.spatial.crs,
+            extent=a.spatial.extent,
+            resolution=(float(gsd), float(gsd)),
+            band_count=1,
+        )
+
         enriched_artifact = Artifact(
             id=a.id,
             type=a.type,
             name=a.name,
             backing=a.backing,
-            spatial=a.spatial,
+            spatial=band_spatial,
             lineage=a.lineage,
             checks=a.checks,
             metadata=enriched_metadata,
@@ -148,7 +158,7 @@ class Sentinel2Connector:
             artifact=enriched_artifact,
             strategy=result.strategy,
             source_ref=source_ref,
-            notes=f"Sentinel-2 {band_info[0] if band_info else asset_key}",
+            notes=f"Sentinel-2 {band_id}",
         )
 
     def discover(self, query: str | dict[str, Any] | None = None) -> list[CatalogEntry]:
@@ -168,47 +178,97 @@ class Sentinel2Connector:
         if isinstance(query, str):
             query = {"datetime": query}
 
+        # Copy to avoid mutating caller's dict
+        query = dict(query)
+
         max_cloud = query.pop("max_cloud", 20)
         bands_only = query.pop("bands_only", False)
 
-        # Set collection
         query.setdefault("collections", [self._collection])
         query.setdefault("max_items", 10)
 
-        # Get scenes from STAC
         stac_entries = self._stac.discover(query)
 
         if not bands_only:
-            # Enrich scene entries with S2 metadata
-            entries = []
-            for entry in stac_entries:
-                cloud_cover = entry.metadata.get("properties", {}).get("eo:cloud_cover")
-                if cloud_cover is not None and cloud_cover > max_cloud:
-                    continue
+            return self._discover_scenes(stac_entries, max_cloud)
 
-                # Identify which S2 bands are available
-                asset_keys = entry.metadata.get("asset_keys", [])
-                available_bands = [k for k in asset_keys if k in _S2_BANDS]
+        return self._discover_bands(stac_entries, max_cloud)
 
-                entries.append(
-                    CatalogEntry(
-                        source_ref=entry.source_ref,
-                        name=entry.name,
-                        description=entry.description,
-                        spatial_hint=entry.spatial_hint,
-                        metadata={
-                            "source": "sentinel2",
-                            "cloud_cover": cloud_cover,
-                            "available_bands": available_bands,
-                            "platform": entry.metadata.get("properties", {}).get("platform"),
-                            "datetime": entry.metadata.get("properties", {}).get("datetime"),
-                        },
-                    )
+    def metadata(self, source_ref: SourceRef | str) -> dict[str, Any]:
+        """Get Sentinel-2 scene + band metadata without materializing."""
+        stac_ref, asset_key = self._parse_source_ref(source_ref)
+
+        if asset_key is not None:
+            resolved_key = self._resolve_band(asset_key)
+            if resolved_key is None:
+                raise MaterializeError(
+                    source_ref,
+                    f"Unknown band '{asset_key}'. "
+                    f"Available: {list(_S2_BANDS.keys())} or {list(_BAND_TO_ASSET.keys())}",
                 )
-            return entries
+            full_ref = f"{stac_ref}::{resolved_key}"
+        else:
+            full_ref = stac_ref
+            resolved_key = None
 
-        # bands_only: return one entry per band per scene
-        entries = []
+        meta = self._stac.metadata(full_ref)
+
+        meta["source"] = "sentinel2"
+        if resolved_key and resolved_key in _S2_BANDS:
+            band_id, common_name, wavelength, gsd = _S2_BANDS[resolved_key]
+            meta.update(
+                {
+                    "band_id": band_id,
+                    "common_name": common_name,
+                    "wavelength_nm": wavelength,
+                    "gsd_m": gsd,
+                }
+            )
+
+        all_keys = meta.get("all_asset_keys", [])
+        meta["available_bands"] = {k: _S2_BANDS[k][0] for k in all_keys if k in _S2_BANDS}
+
+        return meta
+
+    # -----------------------------------------------------------------------
+    # Private: discovery helpers
+    # -----------------------------------------------------------------------
+
+    def _discover_scenes(
+        self, stac_entries: list[CatalogEntry], max_cloud: float
+    ) -> list[CatalogEntry]:
+        """Enrich scene entries with S2 metadata, filtering by cloud cover."""
+        entries: list[CatalogEntry] = []
+        for entry in stac_entries:
+            cloud_cover = entry.metadata.get("properties", {}).get("eo:cloud_cover")
+            if cloud_cover is not None and cloud_cover > max_cloud:
+                continue
+
+            asset_keys = entry.metadata.get("asset_keys", [])
+            available_bands = [k for k in asset_keys if k in _S2_BANDS]
+
+            entries.append(
+                CatalogEntry(
+                    source_ref=entry.source_ref,
+                    name=entry.name,
+                    description=entry.description,
+                    spatial_hint=entry.spatial_hint,
+                    metadata={
+                        "source": "sentinel2",
+                        "cloud_cover": cloud_cover,
+                        "available_bands": available_bands,
+                        "platform": entry.metadata.get("properties", {}).get("platform"),
+                        "datetime": entry.metadata.get("properties", {}).get("datetime"),
+                    },
+                )
+            )
+        return entries
+
+    def _discover_bands(
+        self, stac_entries: list[CatalogEntry], max_cloud: float
+    ) -> list[CatalogEntry]:
+        """Return one entry per band per scene, filtering by cloud cover."""
+        entries: list[CatalogEntry] = []
         for entry in stac_entries:
             cloud_cover = entry.metadata.get("properties", {}).get("eo:cloud_cover")
             if cloud_cover is not None and cloud_cover > max_cloud:
@@ -236,34 +296,8 @@ class Sentinel2Connector:
                 )
         return entries
 
-    def metadata(self, source_ref: SourceRef | str) -> dict[str, Any]:
-        """Get Sentinel-2 scene + band metadata without materializing."""
-        stac_ref, asset_key = self._parse_source_ref(source_ref)
-        resolved_key = self._resolve_band(asset_key) if asset_key else None
-
-        full_ref = f"{stac_ref}::{resolved_key}" if resolved_key else stac_ref
-        meta = self._stac.metadata(full_ref)
-
-        meta["source"] = "sentinel2"
-        if resolved_key and resolved_key in _S2_BANDS:
-            band_id, common_name, wavelength, gsd = _S2_BANDS[resolved_key]
-            meta.update(
-                {
-                    "band_id": band_id,
-                    "common_name": common_name,
-                    "wavelength_nm": wavelength,
-                    "gsd_m": gsd,
-                }
-            )
-
-        # List all available S2 bands
-        all_keys = meta.get("all_asset_keys", [])
-        meta["available_bands"] = {k: _S2_BANDS[k][0] for k in all_keys if k in _S2_BANDS}
-
-        return meta
-
     # -----------------------------------------------------------------------
-    # Private
+    # Private: parsing
     # -----------------------------------------------------------------------
 
     def _parse_source_ref(self, source_ref: SourceRef | str) -> tuple[str, str | None]:
@@ -278,11 +312,9 @@ class Sentinel2Connector:
 
     def _resolve_band(self, band_key: str) -> str | None:
         """Resolve a band key (asset key or band ID) to STAC asset key."""
-        # Already an asset key
         if band_key in _S2_BANDS:
             return band_key
 
-        # Try band ID (e.g., "B04" -> "red")
         upper = band_key.upper()
         if upper in _BAND_TO_ASSET:
             return _BAND_TO_ASSET[upper]
