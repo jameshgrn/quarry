@@ -27,8 +27,14 @@ _REGISTRY: tuple[tuple[str, str, str], ...] = (
     ("rasterize_vector", "quarry_operators.rasterize_vector", "RasterizeVectorOperator"),
     ("reproject", "quarry_operators.reproject", "ReprojectOperator"),
     ("sample_raster", "quarry_operators.sample_raster", "SampleRasterOperator"),
+    ("slc_calibrate", "quarry_operators.slc_calibration", "SLCCalibrationOperator"),
     ("slope", "quarry_operators.slope", "SlopeOperator"),
     ("spatial_join", "quarry_operators.spatial_join", "SpatialJoinOperator"),
+    (
+        "water_elevation_mosaic",
+        "quarry_operators.water_elevation_mosaic",
+        "WaterElevationMosaicOperator",
+    ),
     ("zonal_stats", "quarry_operators.zonal_stats", "ZonalStatsOperator"),
 )
 
