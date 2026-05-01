@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quarry Explorer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+:root {
+  --bg: #090c12;
+  --surface: #111620;
+  --surface-2: #1a2030;
+  --border: #222a3a;
+  --text: #e4e7ef;
+  --text-2: #6e7a99;
+  --text-3: #3e4a63;
+  --accent: #3b82f6;
+  --accent-dim: rgba(59,130,246,0.15);
+  --green: #34d399;
+  --amber: #f59e0b;
+  --red: #ef4444;
+  --radius: 8px;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: 'Inter', -apple-system, system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  height: 100vh;
+  display: flex;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Sidebar ── */
+.sidebar {
+  width: 300px;
+  min-width: 300px;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+.sidebar-section {
+  padding: 16px;
+  border-bottom: 1px solid var(--border);
+}
+.sidebar-section h3 {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-2);
+  margin-bottom: 10px;
+}
+.brand {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.brand span { color: var(--accent); }
+
+/* Scene list */
+.scene-item {
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--text-2);
+  transition: background 0.1s;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.scene-item:hover { background: var(--surface-2); color: var(--text); }
+.scene-item.active { background: var(--accent-dim); color: var(--accent); }
+
+/* Layer controls */
+.layer-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+}
+.layer-item label {
+  font-size: 12px;
+  cursor: pointer;
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.layer-item input[type="checkbox"] {
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.layer-item input[type="range"] {
+  width: 60px;
+  accent-color: var(--accent);
+}
+
+/* Status */
+.status-bar {
+  margin-top: auto;
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-3);
+  font-family: 'JetBrains Mono', monospace;
+}
+.status-bar .ok { color: var(--green); }
+.status-bar .warn { color: var(--amber); }
+
+/* Empty state */
+.empty-state {
+  padding: 20px 16px;
+  font-size: 12px;
+  color: var(--text-3);
+  line-height: 1.5;
+}
+.empty-state code {
+  display: block;
+  margin-top: 8px;
+  padding: 8px;
+  background: var(--surface-2);
+  border-radius: 4px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--text-2);
+  white-space: pre-wrap;
+}
+
+/* ── Map ── */
+.map-container {
+  flex: 1;
+  position: relative;
+}
+#map { height: 100%; width: 100%; }
+.coords-readout {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  z-index: 1000;
+  background: rgba(17,22,32,0.85);
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--text-2);
+  pointer-events: none;
+}
+
+/* Loader */
+.loader {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 1000;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 14px;
+  font-size: 12px;
+  color: var(--text-2);
+  display: none;
+}
+.loader.active { display: flex; align-items: center; gap: 8px; }
+.loader .spinner {
+  width: 14px; height: 14px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Leaflet overrides for dark theme */
+.leaflet-control-zoom a {
+  background: var(--surface) !important;
+  color: var(--text) !important;
+  border-color: var(--border) !important;
+}
+.leaflet-control-attribution {
+  background: rgba(17,22,32,0.7) !important;
+  color: var(--text-3) !important;
+  font-size: 10px !important;
+}
+.leaflet-control-attribution a { color: var(--text-2) !important; }
+</style>
+</head>
+<body>
+
+<div class="sidebar">
+  <div class="brand"><span>Quarry</span> Explorer</div>
+
+  <div class="sidebar-section">
+    <h3>Scenes</h3>
+    <div id="scene-list"></div>
+  </div>
+
+  <div class="sidebar-section" id="layers-section" style="display:none">
+    <h3>Layers</h3>
+    <div id="layer-list"></div>
+  </div>
+
+  <div class="status-bar" id="status">Connecting...</div>
+</div>
+
+<div class="map-container">
+  <div id="map"></div>
+  <div class="coords-readout" id="coords">—</div>
+  <div class="loader" id="loader"><div class="spinner"></div>Loading...</div>
+</div>
+
+<script>
+const API = '/api';
+let map, planetBasemap;
+let overlays = {};
+let loadingCount = 0;
+let catalog = [];
+let currentSceneId = null;
+
+// ── Map init ──
+
+function initMap() {
+  map = L.map('map', { zoomControl: true }).setView([0, 0], 3);
+
+  planetBasemap = L.tileLayer(
+    `${API}/planet/{z}/{y}/{x}`,
+    { maxZoom: 19, attribution: '&copy; Planet Labs' }
+  ).addTo(map);
+
+  const coords = document.getElementById('coords');
+  map.on('mousemove', e => {
+    coords.textContent = `${e.latlng.lat.toFixed(5)}, ${e.latlng.lng.toFixed(5)}`;
+  });
+}
+
+// ── Loading state ──
+
+function showLoader() {
+  loadingCount++;
+  document.getElementById('loader').classList.add('active');
+}
+function hideLoader() {
+  loadingCount = Math.max(0, loadingCount - 1);
+  if (loadingCount === 0) document.getElementById('loader').classList.remove('active');
+}
+
+// ── Catalog ──
+
+async function fetchCatalog() {
+  try {
+    const resp = await fetch(`${API}/scenes`);
+    const data = await resp.json();
+    catalog = data.scenes;
+    renderSceneList();
+    setStatus(catalog.length > 0
+      ? `<span class="ok">${catalog.length} scene(s)</span>`
+      : '<span class="warn">No scenes found</span>');
+    if (catalog.length > 0) selectScene(catalog[0].id);
+  } catch (e) {
+    setStatus(`<span class="warn">API error</span>`);
+    showEmptyState();
+  }
+}
+
+function renderSceneList() {
+  const el = document.getElementById('scene-list');
+  el.innerHTML = '';
+
+  if (catalog.length === 0) {
+    showEmptyState();
+    return;
+  }
+
+  catalog.forEach(scene => {
+    const div = document.createElement('div');
+    div.className = 'scene-item';
+    div.textContent = scene.id;
+    div.addEventListener('click', () => selectScene(scene.id));
+    el.appendChild(div);
+  });
+}
+
+function showEmptyState() {
+  const el = document.getElementById('scene-list');
+  el.innerHTML = `<div class="empty-state">
+    No scenes discovered. Point QUARRY_EXPLORER_DATA at a directory with GeoTIFFs:
+    <code>export QUARRY_EXPLORER_DATA=/path/to/data
+uv run uvicorn quarry_explorer.serve:app --port 8000</code>
+    Expected layout:<code>data/{scene_id}/sigma0.tif
+data/{scene_id}/ifgram_power.tif
+data/geo/{scene_id}/sigma0.tif</code>
+  </div>`;
+}
+
+// ── Scene loading ──
+
+async function selectScene(sceneId) {
+  currentSceneId = sceneId;
+  clearOverlays();
+
+  // Highlight active scene
+  document.querySelectorAll('.scene-item').forEach(el => {
+    el.classList.toggle('active', el.textContent === sceneId);
+  });
+
+  const scene = catalog.find(s => s.id === sceneId);
+  if (!scene) return;
+
+  // Fit map to scene bounds
+  const b = scene.bounds;
+  map.fitBounds([[b[1], b[0]], [b[3], b[2]]], { padding: [40, 40] });
+
+  // Build layer UI
+  const section = document.getElementById('layers-section');
+  section.style.display = '';
+  const layerList = document.getElementById('layer-list');
+  layerList.innerHTML = '';
+
+  for (const layer of scene.layers) {
+    const div = document.createElement('div');
+    div.className = 'layer-item';
+
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = true;
+    cb.id = `cb-${layer.id}`;
+
+    const label = document.createElement('label');
+    label.htmlFor = cb.id;
+    label.textContent = layer.name;
+
+    const slider = document.createElement('input');
+    slider.type = 'range';
+    slider.min = 0;
+    slider.max = 100;
+    slider.value = 80;
+
+    cb.addEventListener('change', () => toggleOverlay(layer.id, cb.checked, slider.value / 100));
+    slider.addEventListener('input', () => {
+      if (cb.checked) setOverlayOpacity(layer.id, slider.value / 100);
+    });
+
+    div.appendChild(cb);
+    div.appendChild(label);
+    div.appendChild(slider);
+    layerList.appendChild(div);
+
+    // Load overlay
+    loadOverlay(sceneId, layer, scene.bounds, slider.value / 100);
+  }
+}
+
+function loadOverlay(sceneId, layer, bounds, opacity) {
+  showLoader();
+  const img = new Image();
+  img.onload = () => {
+    const leafBounds = L.latLngBounds(
+      [bounds[1], bounds[0]],
+      [bounds[3], bounds[2]]
+    );
+    const overlay = L.imageOverlay(img.src, leafBounds, { opacity });
+    overlays[layer.id] = overlay;
+    overlay.addTo(map);
+    hideLoader();
+  };
+  img.onerror = () => {
+    console.warn(`Failed to load overlay: ${layer.id}`);
+    hideLoader();
+  };
+  img.src = `${API}/overlay/${sceneId}/${layer.id}`;
+}
+
+function toggleOverlay(layerId, visible, opacity) {
+  const ov = overlays[layerId];
+  if (!ov) return;
+  if (visible) {
+    ov.addTo(map);
+    ov.setOpacity(opacity);
+  } else {
+    map.removeLayer(ov);
+  }
+}
+
+function setOverlayOpacity(layerId, opacity) {
+  const ov = overlays[layerId];
+  if (ov) ov.setOpacity(opacity);
+}
+
+function clearOverlays() {
+  Object.values(overlays).forEach(ov => map.removeLayer(ov));
+  overlays = {};
+}
+
+function setStatus(html) {
+  document.getElementById('status').innerHTML = html;
+}
+
+// ── Boot ──
+
+initMap();
+fetchCatalog();
+</script>
+</body>
+</html>

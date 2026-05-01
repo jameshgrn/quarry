@@ -45,4 +45,13 @@ tests/fixtures/*.prj
 # Raiding sources (reference only, not part of substrate)
 hydrops/
 
+# Data artifacts
+data/
+
+# Debug screenshots
+explorer-*.png
+
+# Playwright
+.playwright-mcp/
+
 # Lock files stay (uv.lock committed)
