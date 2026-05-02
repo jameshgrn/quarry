@@ -91,6 +91,9 @@ just tree          # Show package dependency graph
 - Operator string params (`compress`, `resampling`, `predicate`) validated against hardcoded tuples — `Literal` types deferred (large surface area)
 - `HydrologyFlow._execute_step` mutates input lists AND returns a value — mixed contract, single caller, low urgency
 - `artifact.metadata` duplicates `spatial` keys (`crs`, `extent`, `band_count`) across all connectors — strip banned keys, enforce 3-way split: `spatial` (typed contract), `metadata` (connector-specific extras), `lineage.params` (execution provenance). Phase: ban new consumers → strip keys → enforce via constructor validation
+- `WaterElevationMosaic._fill_water_mask` iterative dilation O(n×max(h,w)) — scipy.ndimage or numba deferred until perf measured on real SWOT tiles
+- `WaterElevationMosaic._resample_to_grid` uses array-index nearest-neighbor — coordinate-aware resampling deferred until multi-extent inputs tested
+- `GeocodeSLC._find_bracket` + `_range_doppler_to_latlon` pure-Python per-pixel bisection — vectorized or C-extension deferred until perf measured
 
 ## Substrate Phase — COMPLETE
 

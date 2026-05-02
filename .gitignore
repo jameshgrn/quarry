@@ -45,4 +45,7 @@ tests/fixtures/*.prj
 # Raiding sources (reference only, not part of substrate)
 hydrops/
 
+# Data artifacts
+data/
+
 # Lock files stay (uv.lock committed)
