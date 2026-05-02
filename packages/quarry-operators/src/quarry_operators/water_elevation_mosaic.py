@@ -19,7 +19,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 from quarry_core.artifact import (
@@ -286,14 +285,13 @@ class WaterElevationMosaicOperator:
                         f"PIXC raster has {src.count} bands, need at least 2 (height is band 2)",
                     )
                 heights = src.read(2).astype(np.float32)
-                pixc_bounds = src.bounds
 
         except Exception as e:
             raise OperatorError(self.name, f"Failed to read PIXC raster: {e}") from e
 
         # Resample to FOF grid if shapes differ
         if heights.shape != (target_height, target_width):
-            heights = self._resample_to_grid(heights, pixc_bounds, target_height, target_width)
+            heights = self._resample_to_grid(heights, target_height, target_width)
 
         # Apply fof water mask — this IS the filter
         return np.where(spatial_mask, heights, np.nan)
@@ -301,7 +299,6 @@ class WaterElevationMosaicOperator:
     def _resample_to_grid(
         self,
         data: np.ndarray,
-        src_bounds: Any,
         target_height: int,
         target_width: int,
     ) -> np.ndarray:

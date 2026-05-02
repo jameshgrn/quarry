@@ -11,7 +11,7 @@ Stress points:
 6. water_freq_threshold filters correctly (high threshold = fewer water pixels)
 7. Iterative dilation fill propagates heights across water mask
 8. Confidence band counts valid observations per pixel
-9. All 4 declared checks pass on valid output (extent_sane, crs_valid, min_observations, backing_accessible)
+9. All 4 declared checks pass on valid output
 10. Lineage records correct params and input IDs
 11. Output artifact has correct CRS (EPSG:4326), extent, band_count=3
 """
@@ -482,7 +482,7 @@ class TestExecuteBasic:
         output = tmp_path / "wse_mosaic.tif"
         params = WaterElevationMosaicParams(output_path=str(output))
 
-        result = op.execute([fof_art, pixc_art], params)
+        op.execute([fof_art, pixc_art], params)
 
         # Verify output file exists
         assert output.exists()
@@ -492,7 +492,7 @@ class TestExecuteBasic:
             assert src.count == 3
             assert src.dtypes[0] == "float32"
 
-            wse = src.read(1)
+            src.read(1)  # wse
             confidence = src.read(2)
             mask = src.read(3)
 
@@ -540,12 +540,13 @@ class TestExecuteBasic:
         output = tmp_path / "wse_mosaic.tif"
         params = WaterElevationMosaicParams(output_path=str(output))
 
-        result = op.execute([fof_art, pixc_art], params)
+        op.execute([fof_art, pixc_art], params)
 
         with rasterio.open(output) as src:
             output_bounds = src.bounds
 
-        fof_bounds = rasterio.open(fof_path).bounds
+        with rasterio.open(fof_path) as fof_src:
+            fof_bounds = fof_src.bounds
 
         assert abs(output_bounds.left - fof_bounds.left) < 1e-6
         assert abs(output_bounds.right - fof_bounds.right) < 1e-6
@@ -584,7 +585,7 @@ class TestExecuteMultiplePixc:
         output = tmp_path / "wse_mosaic.tif"
         params = WaterElevationMosaicParams(output_path=str(output), aggregation="median")
 
-        result = op.execute([fof_art] + pixc_arts, params)
+        op.execute([fof_art] + pixc_arts, params)
 
         with rasterio.open(output) as src:
             wse = src.read(1)
@@ -613,7 +614,7 @@ class TestExecuteMultiplePixc:
         output = tmp_path / "wse_mosaic.tif"
         params = WaterElevationMosaicParams(output_path=str(output), aggregation="mean")
 
-        result = op.execute([fof_art] + pixc_arts, params)
+        op.execute([fof_art] + pixc_arts, params)
 
         with rasterio.open(output) as src:
             wse = src.read(1)
@@ -632,7 +633,7 @@ class TestExecuteMultiplePixc:
         output = tmp_path / "wse_mosaic.tif"
         params = WaterElevationMosaicParams(output_path=str(output), aggregation="max")
 
-        result = op.execute([fof_art] + pixc_arts, params)
+        op.execute([fof_art] + pixc_arts, params)
 
         with rasterio.open(output) as src:
             wse = src.read(1)
@@ -1119,7 +1120,7 @@ class TestEdgeCases:
         output = tmp_path / "wse_mosaic.tif"
         params = WaterElevationMosaicParams(output_path=str(output))
 
-        result = op.execute([fof_art, pixc_art], params)
+        op.execute([fof_art, pixc_art], params)
 
         # Output should match FOF dimensions
         with rasterio.open(output) as src:
@@ -1149,7 +1150,7 @@ class TestEdgeCases:
         output = tmp_path / "wse_mosaic.tif"
         params = WaterElevationMosaicParams(output_path=str(output))
 
-        result = op.execute([fof_art] + pixc_arts, params)
+        op.execute([fof_art] + pixc_arts, params)
 
         with rasterio.open(output) as src:
             confidence = src.read(2)
@@ -1168,6 +1169,6 @@ class TestEdgeCases:
         output = tmp_path / "nested" / "deep" / "wse_mosaic.tif"
         params = WaterElevationMosaicParams(output_path=str(output))
 
-        result = op.execute([fof_art, pixc_art], params)
+        op.execute([fof_art, pixc_art], params)
 
         assert output.exists()
