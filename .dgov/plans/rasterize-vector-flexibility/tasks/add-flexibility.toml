@@ -1,0 +1,55 @@
+[tasks.add-flexibility]
+summary = "Extend RasterizeVectorOperator with all_touched flag and multi-band output via burn_attributes, with paired pressure tests."
+prompt = """
+Orient:
+- Read `packages/quarry-operators/src/quarry_operators/rasterize_vector.py` end-to-end. Note: `RasterizeVectorParams` has `burn_value`, `burn_attribute` (single, optional), `nodata`, `dtype`, `resolution`, `extent`, `output_path`. The `execute()` method opens the vector via fiona, builds a single `shapes: list[tuple[geojson, float]]` list, calls `rasterio.features.rasterize(shapes, ...)`, and writes a single-band GeoTIFF with `count=1`. The output `Artifact.spatial.band_count` is hardcoded to 1; lineage params record `burn_value`, `burn_attribute`, `nodata`, `dtype`.
+- Read `tests/pressure_test/test_rasterize_vector.py` to learn the existing fixture patterns (shared `op` and `workspace` fixtures, `_write_polygons(path, polygons, properties)` helper, `_make_vector_artifact(path)` helper, EPSG:32610 CRS, GeoJSON inputs). Existing tests cover: protocol compliance, happy-path single burn, attribute burn, no-shapes-emit-nodata, dtype validation, resolution validation, etc. Around 30 tests total.
+- Lane: operator (semantic expansion) + check (paired tests). Single logical commit.
+- Doctrine: this is a strict expansion. The default behavior (single-band, no `all_touched`, `burn_value` constant burn) is unchanged. Existing test assertions must keep passing.
+- HARD BOUNDARY: only `packages/quarry-operators/src/quarry_operators/rasterize_vector.py` and `tests/pressure_test/test_rasterize_vector.py` may be touched (read or write) by your tools. Do NOT open any other file. The settlement gate runs the full pressure suite — trust it.
+- Reference (no need to open these; rasterio API knowledge):
+  - `rasterio.features.rasterize(shapes, ..., all_touched=False)` accepts a bool `all_touched` kwarg. When True, every pixel touched by a geometry edge is included; when False (default), pixel-center inclusion is used.
+  - Multi-band raster writing: open with `count=N`, then `dst.write(band_array, n)` for each 1-indexed band number `n`. Or call `dst.write(stack)` where `stack` has shape `(N, H, W)`.
+
+Edit:
+1. In `packages/quarry-operators/src/quarry_operators/rasterize_vector.py`:
+   a. Extend `RasterizeVectorParams` with two new fields, in this order, after the existing fields:
+      ```python
+      all_touched: bool = False  # rasterio rasterize all_touched semantics; True for thin features
+      burn_attributes: tuple[str, ...] | None = None  # multi-band: one band per attribute name; mutually exclusive with burn_attribute
+      ```
+   b. Update the class docstring (around line 62) to mention multi-band output and all_touched briefly. Keep the existing wording mostly intact; add one sentence explaining `burn_attributes` produces a multi-band GeoTIFF (one band per listed attribute) and `all_touched` includes every pixel touched by an edge.
+   c. In `validate_inputs`, add three new checks:
+      - If `burn_attribute is not None and burn_attributes is not None`: append `"burn_attribute and burn_attributes are mutually exclusive — use one"`.
+      - If `burn_attributes is not None and len(burn_attributes) == 0`: append `"burn_attributes must be non-empty when set"`.
+      - If `burn_attributes is not None`: confirm each entry is a `str`; append `"burn_attributes entries must be strings"` if any is not.
+   d. In `execute()`, refactor the rasterization branch to handle both single-band and multi-band paths:
+      - Determine `band_count`: `len(params.burn_attributes) if params.burn_attributes is not None else 1`.
+      - When multi-band (`burn_attributes` is set): build one `shapes_per_band: list[list[tuple[geojson, float]]]` of length N. For each feature, evaluate each attribute the same way the current single-attribute path does (`raw = props.get(attr)`; skip on None or non-numeric). Append `(geojson, val)` to the matching band's shapes list independently per attribute. Then call `rasterio.features.rasterize(shapes_per_band[i], out_shape=(height, width), transform=transform, fill=params.nodata, dtype=dtype, all_touched=params.all_touched)` for each i, stack into a `(N, H, W)` ndarray.
+      - When single-band: keep the existing path; just thread `all_touched=params.all_touched` into the `rasterize()` call.
+   e. When writing the GeoTIFF: use `count=band_count` in the profile; for single-band keep `dst.write(burned, 1)`; for multi-band, write each band: `for i in range(band_count): dst.write(stack[i], i + 1)`.
+   f. Update the output `Artifact.spatial.band_count` from hardcoded `1` to the computed `band_count`.
+   g. In the lineage params dict, add entries for `all_touched: params.all_touched` and `burn_attributes: list(params.burn_attributes) if params.burn_attributes is not None else None`. Keep existing fields.
+   h. The `shapes_burned` metadata: when single-band, keep `len(shapes)`. When multi-band, sum across bands: `sum(len(s) for s in shapes_per_band)`.
+2. In `tests/pressure_test/test_rasterize_vector.py`, add five new `def test_*` functions at the end of the file, each using existing fixtures (`op`, `workspace`, `_write_polygons` helper, `_make_vector_artifact`, EPSG:32610). Use `rasterio.open` to inspect outputs:
+   a. `test_all_touched_default_false`: Single small polygon (e.g. 0.5×0.5 unit square at non-pixel-aligned position). Run with default params (no `all_touched`). Read output and count non-nodata pixels. Save the count for comparison.
+   b. `test_all_touched_includes_more_pixels_when_true`: Same single polygon as above. Run with `all_touched=True`. Read output and count non-nodata pixels. Assert the count is strictly greater than the default-false count from test (a) — assemble both runs in this single test if cross-test fixture sharing is awkward.
+   c. `test_multi_band_output_band_count`: Vector with three numeric attributes (e.g. `elevation`, `slope`, `aspect`) on each of two polygons. Run with `burn_attributes=("elevation", "slope", "aspect")`. Open output: assert `src.count == 3`, assert `result.artifact.spatial.band_count == 3`, assert `len(result.artifact.lineage.params["burn_attributes"]) == 3`.
+   d. `test_multi_band_per_band_values`: Same fixture as (c). After rasterization, read each band; assert pixels covered by polygon-1 hold the polygon-1 attribute value for each band, and pixels covered by polygon-2 hold polygon-2's values. (Use one pixel-center per polygon as the assertion point.)
+   e. `test_burn_attribute_and_burn_attributes_mutually_exclusive`: Build any valid vector input. Build params with both `burn_attribute="elevation"` and `burn_attributes=("elevation",)`. Call `op.validate_inputs([artifact], params)`. Assert at least one error string contains `"mutually exclusive"`.
+   f. `test_empty_burn_attributes_rejected`: Build params with `burn_attributes=()`. Call `op.validate_inputs([artifact], params)`. Assert at least one error contains `"non-empty"`.
+3. Update the module docstring at the top of `test_rasterize_vector.py` if it enumerates stress points: append the four new entries (all_touched default + greater-when-true; multi-band band count; multi-band per-band values; mutual exclusion + empty rejection). If no enumerated list exists, skip this step.
+
+Verify:
+- `uv run ruff check packages/quarry-operators/src/quarry_operators/rasterize_vector.py tests/pressure_test/test_rasterize_vector.py`
+- `uv run ruff format --check packages/quarry-operators/src/quarry_operators/rasterize_vector.py tests/pressure_test/test_rasterize_vector.py`
+- `PYTHONPATH=packages/quarry-core/src:packages/quarry-connectors/src:packages/quarry-operators/src:packages/quarry-registry/src:packages/quarry-cli/src uv run pytest tests/pressure_test/test_rasterize_vector.py -v`
+- The settlement gate runs the full pressure suite — do NOT run other test files yourself; trust the gate.
+"""
+commit_message = "quarry-operators: add all_touched and multi-band to RasterizeVector"
+self_review = true
+
+files.edit = [
+  "packages/quarry-operators/src/quarry_operators/rasterize_vector.py",
+  "tests/pressure_test/test_rasterize_vector.py",
+]

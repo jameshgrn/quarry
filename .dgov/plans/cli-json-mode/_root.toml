@@ -1,0 +1,4 @@
+[plan]
+name = "cli-json-mode"
+summary = "Add a top-level --json flag to the quarry CLI: all read-only and run subcommands emit machine-readable JSON when set, suppressing human-readable text."
+sections = ["tasks"]
