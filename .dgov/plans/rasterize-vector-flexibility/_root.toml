@@ -1,4 +1,0 @@
-[plan]
-name = "rasterize-vector-flexibility"
-summary = "Add all_touched flag and multi-band output to RasterizeVectorOperator, with paired pressure tests."
-sections = ["tasks"]
