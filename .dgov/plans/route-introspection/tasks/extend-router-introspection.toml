@@ -8,7 +8,7 @@ Orient:
 - Constraint: do NOT change `_Registration` (private), the `register()` signature, the `select()`/`select_one()` behavior, or `MatchReason`. Behavioral surface is read-only introspection only.
 - Constraint: keep `registrations` as a `@property` on `ConnectorRouter` (callers depend on attribute access).
 - Lane declaration: registry (router introspection) + check (test update).
-- HARD BOUNDARY: this task may ONLY write to `packages/quarry-core/src/quarry_core/router.py` and `tests/pressure_test/test_connector_router.py`. Editing any other file (including `tests/pressure_test/test_policy_surface.py`, `tests/pressure_test/test_router_integration.py`, or any source under `packages/quarry-connectors/` or `packages/quarry-cli/`) is a scope violation. If a settlement-gate failure cites a file outside this pair, the diagnosis is wrong; re-read the error and look for the real cause inside the two writable files.
+- HARD BOUNDARY: this task may ONLY touch (read OR write) `packages/quarry-core/src/quarry_core/router.py` and `tests/pressure_test/test_connector_router.py`. Do NOT open, read, or modify any other file via your tools — not other test files, not other packages, not docs. The settlement gate will run the full pressure suite to confirm no broader regression; you do not need to verify other files yourself. If a gate failure cites a file outside this pair, the diagnosis is wrong; re-read the error and look for the real cause inside the two writable files.
 - HARD BOUNDARY: this repo runs Python 3.11+ (current interpreter is 3.11.6). `tomllib` is in the stdlib. Do NOT add a `tomli` fallback or any `try/except ModuleNotFoundError` import shim anywhere — there is no Python 3.10 path to support.
 
 Edit:
@@ -29,7 +29,7 @@ Verify:
 - `uv run ruff check packages/quarry-core/src/quarry_core/router.py tests/pressure_test/test_connector_router.py`
 - `uv run ruff format --check packages/quarry-core/src/quarry_core/router.py tests/pressure_test/test_connector_router.py`
 - `PYTHONPATH=packages/quarry-core/src:packages/quarry-connectors/src:packages/quarry-operators/src:packages/quarry-registry/src:packages/quarry-cli/src uv run pytest tests/pressure_test/test_connector_router.py -q`
-- `PYTHONPATH=packages/quarry-core/src:packages/quarry-connectors/src:packages/quarry-operators/src:packages/quarry-registry/src:packages/quarry-cli/src uv run pytest tests/pressure_test/test_router_integration.py tests/pressure_test/test_policy_surface.py -q` (must remain green — no behavioral change).
+- The settlement gate runs the full pressure suite (`tests/pressure_test/` and `packages/quarry-connectors/tests/`) — do NOT run those yourself; trust the gate.
 """
 commit_message = "quarry-core: type ConnectorRouter.registrations view"
 self_review = true
@@ -37,8 +37,4 @@ self_review = true
 files.edit = [
   "packages/quarry-core/src/quarry_core/router.py",
   "tests/pressure_test/test_connector_router.py",
-]
-files.read = [
-  "tests/pressure_test/test_router_integration.py",
-  "tests/pressure_test/test_policy_surface.py",
 ]
