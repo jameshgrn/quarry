@@ -94,7 +94,6 @@ Prime directive: Preserve the ontology. Do not invent parallel abstractions.
 - Flat gradient uses naive BFS — Barnes et al. (2015) optimal flat resolution deferred
 - ZonalStats per-zone rasterization O(zones×pixels) — vectorized groupby deferred until perf measured
 - SpatialJoin O(left×right) brute force — STRtree spatial index deferred until perf measured
-- SpatialJoin only supports `intersects` predicate — `contains`, `within`, `touches` deferred
 - BuildCOG only tested with GeoTIFF input — other rasterio formats untested
 - RasterizeVector only tested with polygons — line/point rasterization deferred
 - RasterizeVector single-band only — multi-band output deferred
