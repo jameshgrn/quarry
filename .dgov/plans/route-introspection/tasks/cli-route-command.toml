@@ -1,0 +1,57 @@
+[tasks.cli-route-command]
+summary = "Add `quarry route <source>` CLI subcommand that prints the inferred SourceRef and ranked connector matches, with a paired pressure test."
+prompt = """
+Orient:
+- Read `packages/quarry-cli/src/quarry_cli/main.py` start-to-finish. Pay attention to: imports, `_get_router()`, `_source_ref_from_cli`, the existing `cmd_*` patterns, the `_handle_invalid_checks` exit-code-2 convention, and the `build_parser()` subparser wiring (the `run` subcommand and how `runs`, `lineage`, `checks` parsers are added).
+- Read `packages/quarry-core/src/quarry_core/router.py` for the `RegistrationView`, `ConnectorMatch`, `MatchReason`, and `NoConnectorError` types you will use here. Do NOT modify it — that lane was completed by the `extend-router-introspection` task this depends on.
+- Read `packages/quarry-connectors/src/quarry_connectors/router.py` to confirm `build_default_router` is the canonical entry point already used by `_get_router()`.
+- Read `tests/pressure_test/test_cli_zonal.py` for the canonical CLI-pressure-test fixture pattern (subprocess-free invocation via `quarry_cli.main.main`, `capsys`, exit-code assertions).
+- Lane: adapter (cli) + check (test). One logical commit.
+- Doctrine: this command is read-only. It MUST NOT materialize, MUST NOT touch the registry, MUST NOT write workspace artifacts. Pure introspection.
+
+Edit:
+1. In `packages/quarry-cli/src/quarry_cli/main.py`:
+   a. Add a new top-level handler `cmd_route(args) -> int` after `cmd_checks_show`. It must:
+      - Build a router via `_get_router()`.
+      - Resolve the source: do NOT use `_source_ref_from_cli` (that requires the file to exist on disk; routing inspection should work for synthetic strings too). Instead: if the raw string contains `://`, call `SourceRef.infer(raw)`; otherwise still call `SourceRef.infer(raw)` — `infer` already handles local paths. Keep it that simple.
+      - Print three sections to stdout in this exact order, each preceded by an underlined header line:
+        1. `Source` — print `raw: <args.source>`, `kind: <ref.kind.value>`, and (if non-empty) `params: <ref.params>` on separate `  key: value` lines.
+        2. `Matches` — call `router.select(ref)`. If the list is empty, print `  (none)`. Otherwise print one line per match in rank order: `  [{rank}] {connector_name} ({reason}) — kinds={sorted kinds values}, ext={sorted ext set or '-'}, scheme={sorted schemes or '-'}, prefix={sorted prefixes or '-'}`. To get the policy surface for each match: build a list of `RegistrationView` objects from `router.registrations`, then for each `ConnectorMatch` look up the view by matching `view.connector_name == match.connector.name` AND `ref.kind in view.kinds` (a single connector can be registered multiple times across kinds with different filters; pick the registration that actually applies to this ref's kind). If no view matches that pair (should not happen for a valid match), fall back to the first view with the same `connector_name`.
+        3. `Selected` — if matches is non-empty, print `  {connector_name}` (the rank-0 entry, i.e. matches[0]). If empty, print `  (no connector — NoConnectorError would be raised at materialize time)`.
+      - Return `0` if matches is non-empty, `2` otherwise (matches the existing semantic-failure convention used by `_handle_invalid_checks`).
+      - On any unexpected exception during inference (e.g. malformed input that `SourceRef.infer` rejects), catch it, print `ERROR: <message>` to stderr, return `1`.
+   b. Wire the subcommand in `build_parser()` at the same indent level as the existing `subparsers.add_parser("lineage", ...)` block (i.e. a top-level subparser, NOT under `run`). Use:
+      - `route_parser = subparsers.add_parser("route", help="Show inferred SourceRef and ranked connector matches for a source string")`.
+      - One required positional: `route_parser.add_argument("source", help="Source string (path, URI, STAC reference, etc.)")`.
+      - `route_parser.set_defaults(func=cmd_route)`.
+      - No `--workspace` argument: this command is workspace-independent.
+2. Create `tests/pressure_test/test_cli_route.py` mirroring the docstring style of `tests/pressure_test/test_cli_zonal.py`. Required tests (each as its own `def test_*` function or in classes — match the surrounding repo style):
+   a. `test_route_local_raster_selects_cog` — pass a path ending in `.tif` (the file does NOT need to exist; this is pure inspection). Capture stdout. Assert exit code is `0`, stdout contains `kind: local_raster`, contains `cog` in the Matches block, and `Selected` line names `cog`.
+   b. `test_route_ambiguous_geojson_falls_back_to_local_file` — pass `/tmp/x.geojson`. Assert exit `0`, stdout `Selected` line names `local_file`.
+   c. `test_route_remote_cog_uri` — pass `s3://bucket/dem.tif`. Assert exit `0`, stdout `kind: remote_uri`, `Selected` names `cog`, and the Matches block shows `scheme=` containing `s3`.
+   d. `test_route_unsupported_source_returns_2` — pass a string with no eligible connector (e.g. `mailto:foo@bar.com`). Assert exit `2`, stdout `Matches` block contains `(none)` and `Selected` line contains `no connector`.
+   e. `test_route_does_not_materialize` — call the CLI with a `.tif` path that does NOT exist on disk; assert exit `0` (so introspection works without I/O) and that no file at the synthetic path was created (use `tmp_path / 'fake.tif'` and assert `not path.exists()` after).
+   - Use `from quarry_cli.main import main` and invoke as `main(["route", source])` with `capsys` to capture stdout/stderr. Pattern matches existing CLI tests.
+   - Do not require a Registry, do not require a workspace fixture. The command must be pure.
+
+Verify:
+- `uv run ruff check packages/quarry-cli/src/quarry_cli/main.py tests/pressure_test/test_cli_route.py`
+- `uv run ruff format --check packages/quarry-cli/src/quarry_cli/main.py tests/pressure_test/test_cli_route.py`
+- `PYTHONPATH=packages/quarry-core/src:packages/quarry-connectors/src:packages/quarry-operators/src:packages/quarry-registry/src:packages/quarry-cli/src uv run pytest tests/pressure_test/test_cli_route.py -v`
+- `PYTHONPATH=packages/quarry-core/src:packages/quarry-connectors/src:packages/quarry-operators/src:packages/quarry-registry/src:packages/quarry-cli/src uv run pytest tests/pressure_test/test_cli_zonal.py tests/pressure_test/test_cli_sample.py tests/pressure_test/test_cli_rasterize.py tests/pressure_test/test_cli_inspection.py tests/pressure_test/test_policy_surface.py -q` (existing CLI surface unchanged).
+"""
+commit_message = "quarry-cli: add route subcommand for connector routing introspection"
+self_review = true
+depends_on = ["tasks/extend-router-introspection.extend-router-introspection"]
+
+files.edit = ["packages/quarry-cli/src/quarry_cli/main.py"]
+files.create = ["tests/pressure_test/test_cli_route.py"]
+files.read = [
+  "packages/quarry-core/src/quarry_core/router.py",
+  "packages/quarry-connectors/src/quarry_connectors/router.py",
+  "tests/pressure_test/test_cli_zonal.py",
+  "tests/pressure_test/test_cli_sample.py",
+  "tests/pressure_test/test_cli_rasterize.py",
+  "tests/pressure_test/test_cli_inspection.py",
+  "tests/pressure_test/test_policy_surface.py",
+]
