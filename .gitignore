@@ -34,6 +34,8 @@ venv/
 # Session
 HANDOVER.md
 .napkin.md
+.playwright-mcp/
+explorer-*.png
 
 # Test fixtures (binary)
 tests/fixtures/*.tif

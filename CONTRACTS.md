@@ -7,11 +7,11 @@ Canonical definitions. If the code and this doc disagree, the code wins — but 
 The internal unit of truth. NOT a file.
 
 - **Identity** is the `id` field (UUID). Not the path. Not the name.
-- **BackingStore** describes where data physically lives (local_file, remote_uri, lazy_handle, memory, duckdb, postgis). This is NOT identity.
+- **BackingStore** describes where data physically lives (local_file, lazy_handle, duckdb, postgis). This is NOT identity.
 - **SpatialDescriptor** holds CRS, extent, resolution, feature_count, band_count. Populated from actual data, not guessed.
 - **Lineage** records how the artifact was created (operation, input IDs, params, timestamp) and persists with the artifact itself.
 - **Checks** accumulate from the checks table. Artifact exposes `validation_state` derived from accumulated check results.
-- **Metadata** is an opaque connector extension bag for source-specific, non-canonical descriptive context (driver, theme, layer name, dataset identity). Must never duplicate or override typed artifact contract fields (`spatial`, `lineage`). Operators must not depend on metadata keys.
+- **Metadata** is an opaque connector extension bag for source-specific, non-canonical descriptive context (driver, theme, layer name, dataset identity). Must never duplicate or override typed artifact contract fields (`spatial`, `lineage`). Top-level spatial duplicate keys (`crs`, `extent`, `bounds`, `resolution`, `feature_count`, `band_count`) are stripped at `Artifact` construction. Operators must not depend on metadata keys.
 
 Mutability rules:
 - `id`, `type`: immutable
@@ -68,15 +68,20 @@ Lives in quarry-core (zero deps). Lane: registry.
 - **Output**: `list[ConnectorMatch]` — ranked by priority (lower = better)
 - **No execution** — selection only. Does not call `materialize`.
 - Connectors register with explicit `kinds: set[SourceRefKind]` + `priority: int`
+- Registrations may narrow broad kind matches with `extensions`, `schemes`, and `prefixes`
 - `fallback=True` connectors also match UNKNOWN refs (ranked +1000)
 - `select()` returns all matches sorted by rank
 - `select_one()` returns best match or raises `NoConnectorError`
+- `quarry-connectors.router.build_default_router()` owns the canonical default connector registrations for adapters
 
-Precedence rules (with standard registration):
-- Local GeoTIFF → COG (priority 0) + LocalFile (priority 10) — both match, COG preferred
-- Local GeoJSON → LocalFile only
-- Remote URI → COG only
-- STAC catalog item → STAC only
+Precedence rules (with default connector registration):
+- Local GeoTIFF → COG (priority 0) + LocalFile (priority 100) — both match, COG preferred
+- Local Shapefile/GeoPackage/HDF5/NetCDF/etc. → specialized connector + LocalFile fallback
+- Ambiguous local `.geojson`/`.json` → LocalFile only
+- Remote GeoTIFF → COG + ObjectStore, COG preferred
+- Remote non-COG object URI → ObjectStore
+- `wms::`, `wfs::`, `overture://`, `opentopo://` → provider connector before STAC
+- STAC catalog item without a provider prefix → STAC
 - Database ref → PostGIS only
 - DuckDB ref → DuckDB only
 - Unknown → fallback connectors only (if any registered)

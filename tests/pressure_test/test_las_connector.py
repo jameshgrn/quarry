@@ -392,7 +392,7 @@ class TestLASCRS:
 
         # CRS should be present (either as WKT or parsed)
         assert result.artifact.spatial.crs is not None
-        assert result.artifact.metadata["crs"] is not None
+        assert "crs" not in result.artifact.metadata
 
     def test_crs_none_when_not_present(self, las_file, tmp_path):
         connector = LASPointCloudConnector()
@@ -400,7 +400,7 @@ class TestLASCRS:
 
         # No CRS in this file
         assert result.artifact.spatial.crs is None
-        assert result.artifact.metadata["crs"] is None
+        assert "crs" not in result.artifact.metadata
 
     def test_metadata_crs(self, las_file_with_crs):
         connector = LASPointCloudConnector()

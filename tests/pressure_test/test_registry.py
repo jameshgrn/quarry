@@ -16,7 +16,13 @@ import numpy as np
 import pytest
 import rasterio
 from quarry_connectors.local_file import LocalFileConnector
-from quarry_core.artifact import ArtifactType, BackingStoreKind, ValidationState
+from quarry_core.artifact import (
+    Artifact,
+    ArtifactType,
+    BackingStoreKind,
+    SpatialDescriptor,
+    ValidationState,
+)
 from quarry_core.check import CRSValid
 from quarry_core.executor import RunStatus
 from quarry_core.executors.local import LocalExecutor
@@ -114,6 +120,28 @@ class TestArtifactRoundTrip:
         recovered = registry.get_artifact(artifact.id)
 
         assert recovered.metadata == artifact.metadata
+
+    def test_metadata_does_not_duplicate_spatial_contract(self):
+        artifact = Artifact(
+            type=ArtifactType.VECTOR,
+            spatial=SpatialDescriptor(
+                crs="EPSG:4326",
+                extent=(0.0, 1.0, 2.0, 3.0),
+                feature_count=7,
+            ),
+            metadata={
+                "driver": "GeoJSON",
+                "crs": "EPSG:3857",
+                "extent": (-1.0, -1.0, 1.0, 1.0),
+                "bounds": (-1.0, -1.0, 1.0, 1.0),
+                "feature_count": 99,
+            },
+        )
+
+        assert artifact.metadata == {"driver": "GeoJSON"}
+        assert artifact.spatial.crs == "EPSG:4326"
+        assert artifact.spatial.extent == (0.0, 1.0, 2.0, 3.0)
+        assert artifact.spatial.feature_count == 7
 
     def test_with_check_does_not_alias_metadata(self, sample_raster, workspace):
         conn = LocalFileConnector()

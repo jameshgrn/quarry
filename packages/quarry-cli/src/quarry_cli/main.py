@@ -12,54 +12,74 @@ import os
 import sys
 from pathlib import Path
 
-from quarry_connectors.cog import COGConnector
-from quarry_connectors.duckdb_connector import DuckDBConnector
-from quarry_connectors.local_file import LocalFileConnector
-from quarry_connectors.postgis import PostGISConnector
-from quarry_connectors.stac import STACConnector
-from quarry_core.router import ConnectorRouter
-from quarry_core.source_ref import SourceRef, SourceRefKind
+from quarry_connectors.router import build_default_router
+from quarry_core.executor import RunRecord
+from quarry_core.operator import OperatorParams, OperatorResult
+from quarry_core.router import ConnectorRouter, NoConnectorError
+from quarry_core.source_ref import RASTER_EXTENSIONS, VECTOR_EXTENSIONS, SourceRef, SourceRefKind
+
+_LOCAL_SOURCE_KINDS = {
+    SourceRefKind.LOCAL_PATH,
+    SourceRefKind.LOCAL_RASTER,
+    SourceRefKind.LOCAL_VECTOR,
+}
+_LOCAL_EXTENSIONS = RASTER_EXTENSIONS | VECTOR_EXTENSIONS
+
+
+def _existing_local_source_ref(path_part: str, sep: str, suffix: str, label: str) -> SourceRef:
+    resolved = Path(path_part).expanduser().resolve()
+    if not resolved.exists():
+        raise ValueError(f"{label} file not found: {resolved}")
+    ref_raw = f"{resolved}{sep}{suffix}" if sep else str(resolved)
+    return SourceRef.local(ref_raw)
 
 
 def _get_router() -> ConnectorRouter:
-    """Create and configure a ConnectorRouter with all available connectors."""
-    router = ConnectorRouter()
-    # COGConnector has priority 0 for raster routing (higher priority)
-    router.register(
-        COGConnector(),
-        priority=0,
-        kinds=[SourceRefKind.LOCAL_RASTER, SourceRefKind.REMOTE_URI],
-    )
-    # STACConnector handles STAC catalogs and items
+    """Create the default CLI router for common source references."""
     stac_api = os.environ.get("STAC_API_URL", "https://earth-search.aws.element84.com/v0")
-    router.register(
-        STACConnector(api_url=stac_api),
-        priority=0,
-        kinds=[SourceRefKind.CATALOG_ITEM],
-    )
-    # PostGISConnector handles database references
-    router.register(
-        PostGISConnector(),
-        priority=0,
-        kinds=[SourceRefKind.DATABASE_REF],
-    )
-    # DuckDBConnector handles DuckDB database files
-    router.register(
-        DuckDBConnector(),
-        priority=0,
-        kinds=[SourceRefKind.DUCKDB],
-    )
-    # LocalFileConnector is fallback with priority 10
-    router.register(
-        LocalFileConnector(),
-        priority=10,
-        kinds=[SourceRefKind.LOCAL_PATH, SourceRefKind.LOCAL_RASTER, SourceRefKind.LOCAL_VECTOR],
-    )
-    return router
+    return build_default_router(stac_api_url=stac_api)
 
 
 def _resolve_workspace(args) -> Path:
     return Path(args.workspace).resolve()
+
+
+def _source_ref_from_cli(raw: str, label: str) -> SourceRef:
+    stripped = raw.strip()
+    path_part, sep, suffix = stripped.partition("::")
+    path = Path(path_part).expanduser()
+    extension = path.suffix.lower()
+    explicit_local = path_part.startswith(("/", "./", "../", "~"))
+    extension_local = extension in _LOCAL_EXTENSIONS
+
+    if explicit_local or extension_local:
+        return _existing_local_source_ref(path_part, sep, suffix, label)
+
+    inferred = SourceRef.infer(stripped)
+    if inferred.kind in _LOCAL_SOURCE_KINDS:
+        return _existing_local_source_ref(path_part, sep, suffix, label)
+
+    if inferred.kind == SourceRefKind.UNKNOWN and path.exists():
+        return _existing_local_source_ref(path_part, sep, suffix, label)
+
+    return inferred
+
+
+def _materialize_cli_source(
+    router: ConnectorRouter,
+    raw: str,
+    workspace: Path,
+    *,
+    label: str,
+):
+    source_ref = _source_ref_from_cli(raw, label)
+    try:
+        match = router.select_one(source_ref)
+    except NoConnectorError as e:
+        raise ValueError(str(e)) from e
+
+    print(f"Materializing {label.lower()}: {source_ref.raw}")
+    return match.connector.materialize(source_ref.raw, workspace).artifact
 
 
 def _handle_run_failure(run_record) -> int:
@@ -83,6 +103,12 @@ def _handle_invalid_checks(checks, subject: str) -> int:
     for c in invalid:
         print(f"  [{c.check_name}] {c.message}", file=sys.stderr)
     return 2
+
+
+def _require_run_output(run_record: RunRecord) -> OperatorResult:
+    if run_record.output is None:
+        raise RuntimeError(f"{run_record.operator_name} completed without output")
+    return run_record.output
 
 
 # ---------------------------------------------------------------------------
@@ -303,7 +329,11 @@ def cmd_checks_show(args) -> int:
         run_id=target_id if run else None,
     )
 
-    label = f"artifact {artifact.name}" if artifact else f"run {run.operator_name}"
+    if artifact is not None:
+        label = f"artifact {artifact.name}"
+    else:
+        assert run is not None
+        label = f"run {run.operator_name}"
     print(f"Checks for {label} ({target_id}):")
 
     if not checks:
@@ -332,23 +362,15 @@ def cmd_run_hydrology(args) -> int:
     from quarry_operators.hydrology_flow import HydrologyFlow, HydrologyFlowParams
     from quarry_registry.registry import Registry
 
-    dem_path = Path(args.dem).resolve()
-    if not dem_path.exists():
-        print(f"DEM file not found: {dem_path}", file=sys.stderr)
-        return 1
-
     workspace = _resolve_workspace(args)
 
     # Materialize DEM through router
     router = _get_router()
-    source_ref = SourceRef.local(str(dem_path))
-    match = router.select_one(source_ref)
-    if not match:
-        raise ValueError(f"No connector found for {source_ref}")
-    connector = match.connector
-    print(f"Materializing DEM: {dem_path}")
-    result = connector.materialize(str(dem_path), workspace)
-    dem_artifact = result.artifact
+    try:
+        dem_artifact = _materialize_cli_source(router, args.dem, workspace, label="DEM")
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
+        return 1
 
     # Set up executor + registry + flow
     executor = LocalExecutor()
@@ -395,34 +417,16 @@ def cmd_run_zonal(args) -> int:
     from quarry_operators.zonal_stats import ZonalStatsOperator, ZonalStatsParams
     from quarry_registry.registry import Registry
 
-    raster_path = Path(args.raster).resolve()
-    if not raster_path.exists():
-        print(f"Raster file not found: {raster_path}", file=sys.stderr)
-        return 1
-
-    zones_path = Path(args.zones).resolve()
-    if not zones_path.exists():
-        print(f"Zones file not found: {zones_path}", file=sys.stderr)
-        return 1
-
     workspace = _resolve_workspace(args)
 
     # Materialize both inputs through router
     router = _get_router()
-
-    print(f"Materializing raster: {raster_path}")
-    raster_source_ref = SourceRef.local(str(raster_path))
-    raster_match = router.select_one(raster_source_ref)
-    if not raster_match:
-        raise ValueError(f"No connector found for {raster_source_ref}")
-    raster_artifact = raster_match.connector.materialize(str(raster_path), workspace).artifact
-
-    print(f"Materializing zones: {zones_path}")
-    zones_source_ref = SourceRef.local(str(zones_path))
-    zones_match = router.select_one(zones_source_ref)
-    if not zones_match:
-        raise ValueError(f"No connector found for {zones_source_ref}")
-    zones_artifact = zones_match.connector.materialize(str(zones_path), workspace).artifact
+    try:
+        raster_artifact = _materialize_cli_source(router, args.raster, workspace, label="Raster")
+        zones_artifact = _materialize_cli_source(router, args.zones, workspace, label="Zones")
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
+        return 1
 
     # Set up executor + registry
     executor = LocalExecutor()
@@ -447,19 +451,18 @@ def cmd_run_zonal(args) -> int:
         [raster_artifact, zones_artifact],
         params,
     )
+    registry.save_run(run_record)
+
     failure_rc = _handle_run_failure(run_record)
     if failure_rc:
         return 1
-
-    # Persist
-    registry.save_run(run_record)
 
     invalid_rc = _handle_invalid_checks(run_record.checks, run_record.operator_name)
     if invalid_rc:
         return invalid_rc
 
     # Report
-    output = run_record.output.artifact
+    output = _require_run_output(run_record).artifact
     uri = output.backing.uri if output.backing else "?"
     print(f"\nCompleted (1 step, {len(run_record.checks)} checks)")
     print(f"  {output.name:<25} → {uri}")
@@ -478,34 +481,16 @@ def cmd_run_sample(args) -> int:
     from quarry_operators.sample_raster import SampleRasterOperator, SampleRasterParams
     from quarry_registry.registry import Registry
 
-    raster_path = Path(args.raster).resolve()
-    if not raster_path.exists():
-        print(f"Raster file not found: {raster_path}", file=sys.stderr)
-        return 1
-
-    points_path = Path(args.points).resolve()
-    if not points_path.exists():
-        print(f"Points file not found: {points_path}", file=sys.stderr)
-        return 1
-
     workspace = _resolve_workspace(args)
 
     # Materialize both inputs through router
     router = _get_router()
-
-    print(f"Materializing raster: {raster_path}")
-    raster_source_ref = SourceRef.local(str(raster_path))
-    raster_match = router.select_one(raster_source_ref)
-    if not raster_match:
-        raise ValueError(f"No connector found for {raster_source_ref}")
-    raster_artifact = raster_match.connector.materialize(str(raster_path), workspace).artifact
-
-    print(f"Materializing points: {points_path}")
-    points_source_ref = SourceRef.local(str(points_path))
-    points_match = router.select_one(points_source_ref)
-    if not points_match:
-        raise ValueError(f"No connector found for {points_source_ref}")
-    points_artifact = points_match.connector.materialize(str(points_path), workspace).artifact
+    try:
+        raster_artifact = _materialize_cli_source(router, args.raster, workspace, label="Raster")
+        points_artifact = _materialize_cli_source(router, args.points, workspace, label="Points")
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
+        return 1
 
     # Set up executor + registry
     executor = LocalExecutor()
@@ -542,19 +527,18 @@ def cmd_run_sample(args) -> int:
         [raster_artifact, points_artifact],
         params,
     )
+    registry.save_run(run_record)
+
     failure_rc = _handle_run_failure(run_record)
     if failure_rc:
         return 1
-
-    # Persist
-    registry.save_run(run_record)
 
     invalid_rc = _handle_invalid_checks(run_record.checks, run_record.operator_name)
     if invalid_rc:
         return invalid_rc
 
     # Report
-    output = run_record.output.artifact
+    output = _require_run_output(run_record).artifact
     uri = output.backing.uri if output.backing else "?"
     print(f"\nCompleted (1 step, {len(run_record.checks)} checks)")
     print(f"  {output.name:<25} → {uri}")
@@ -576,22 +560,15 @@ def cmd_run_rasterize(args) -> int:
     )
     from quarry_registry.registry import Registry
 
-    vector_path = Path(args.vector).resolve()
-    if not vector_path.exists():
-        print(f"Vector file not found: {vector_path}", file=sys.stderr)
-        return 1
-
     workspace = _resolve_workspace(args)
 
     # Materialize input through router
     router = _get_router()
-    vector_source_ref = SourceRef.local(str(vector_path))
-    vector_match = router.select_one(vector_source_ref)
-    if not vector_match:
-        raise ValueError(f"No connector found for {vector_source_ref}")
-    connector = vector_match.connector
-    print(f"Materializing vector: {vector_path}")
-    vector_artifact = connector.materialize(str(vector_path), workspace).artifact
+    try:
+        vector_artifact = _materialize_cli_source(router, args.vector, workspace, label="Vector")
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
+        return 1
 
     # Set up executor + registry
     executor = LocalExecutor()
@@ -658,19 +635,18 @@ def cmd_run_rasterize(args) -> int:
         [vector_artifact],
         params,
     )
+    registry.save_run(run_record)
+
     failure_rc = _handle_run_failure(run_record)
     if failure_rc:
         return 1
-
-    # Persist
-    registry.save_run(run_record)
 
     invalid_rc = _handle_invalid_checks(run_record.checks, run_record.operator_name)
     if invalid_rc:
         return invalid_rc
 
     # Report
-    output = run_record.output.artifact
+    output = _require_run_output(run_record).artifact
     uri = output.backing.uri if output.backing else "?"
     print(f"\nCompleted (1 step, {len(run_record.checks)} checks)")
     print(f"  {output.name:<25} → {uri}")
@@ -744,7 +720,11 @@ def _coerce_value(raw: str, target_type: type) -> object:
     raise ValueError(f"Unsupported param type: {target_type}")
 
 
-def _build_params(params_cls: type, raw_params: dict[str, str], output_path: str) -> object:
+def _build_params(
+    params_cls: type[OperatorParams],
+    raw_params: dict[str, str],
+    output_path: str,
+) -> OperatorParams:
     """Build a typed params dataclass from raw CLI key=value strings."""
     import dataclasses
     import typing
@@ -762,7 +742,10 @@ def _build_params(params_cls: type, raw_params: dict[str, str], output_path: str
             )
         kwargs[key] = _coerce_value(raw_value, hints[key])
 
-    return params_cls(**kwargs)
+    params = params_cls(**kwargs)
+    if not isinstance(params, OperatorParams):
+        raise TypeError(f"{params_cls.__name__} must inherit OperatorParams")
+    return params
 
 
 # ---------------------------------------------------------------------------
@@ -836,18 +819,12 @@ def cmd_run_generic(args) -> int:
     router = _get_router()
     artifacts = []
     for input_path_str in input_paths:
-        p = Path(input_path_str).resolve()
-        if not p.exists():
-            print(f"Input file not found: {p}", file=sys.stderr)
+        try:
+            artifact = _materialize_cli_source(router, input_path_str, workspace, label="Input")
+        except ValueError as e:
+            print(str(e), file=sys.stderr)
             return 1
-        source_ref = SourceRef.local(str(p))
-        match = router.select_one(source_ref)
-        if not match:
-            print(f"No connector found for: {source_ref.raw}", file=sys.stderr)
-            return 1
-        print(f"Materializing: {p}")
-        result = match.connector.materialize(str(p), workspace)
-        artifacts.append(result.artifact)
+        artifacts.append(artifact)
 
     # 6. Set up executor + registry
     executor = LocalExecutor()
@@ -858,20 +835,18 @@ def cmd_run_generic(args) -> int:
     # 7. Execute
     print(f"Running {operator_name} → {output_path}")
     run_record = executor.submit(operator, artifacts, params)
+    registry.save_run(run_record)
 
     failure_rc = _handle_run_failure(run_record)
     if failure_rc:
         return failure_rc
-
-    # 8. Persist
-    registry.save_run(run_record)
 
     invalid_rc = _handle_invalid_checks(run_record.checks, run_record.operator_name)
     if invalid_rc:
         return invalid_rc
 
     # 9. Report
-    output_artifact = run_record.output.artifact
+    output_artifact = _require_run_output(run_record).artifact
     uri = output_artifact.backing.uri if output_artifact.backing else "?"
     print(f"\nCompleted (1 step, {len(run_record.checks)} checks)")
     print(f"  {output_artifact.name:<25} → {uri}")

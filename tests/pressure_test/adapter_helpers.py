@@ -60,3 +60,17 @@ def make_invalid_completed_run(
         completed_at=now,
         executor_name="test",
     )
+
+
+def make_failed_run(operator_name: str, *, error: str = "pressure-test failure") -> RunRecord:
+    now = datetime.now(timezone.utc)
+    return RunRecord(
+        id=f"{operator_name}-failed-run",
+        operator_name=operator_name,
+        status=RunStatus.FAILED,
+        submitted_at=now,
+        started_at=now,
+        completed_at=now,
+        executor_name="test",
+        error=error,
+    )

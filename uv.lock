@@ -27,6 +27,8 @@ members = [
 
 [manifest.dependency-groups]
 dev = [
+    { name = "h5py", specifier = ">=3.8.0" },
+    { name = "laspy", specifier = ">=2.0.0" },
     { name = "matplotlib", specifier = ">=3.10.8" },
     { name = "netcdf4", specifier = ">=1.7.3" },
     { name = "openpyxl", specifier = ">=3.1.5" },

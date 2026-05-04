@@ -93,7 +93,7 @@ def _freeze_params(params: Mapping[str, Any]) -> Mapping[str, Any]:
 
 def _classify_local_path(path: str) -> SourceRefKind:
     """Classify a local path by geospatial file kind when the extension is known."""
-    lower = path.lower()
+    lower = path.split("::", 1)[0].split("?", 1)[0].split("#", 1)[0].rstrip("/").lower()
     for ext in RASTER_EXTENSIONS:
         if lower.endswith(ext):
             return SourceRefKind.LOCAL_RASTER

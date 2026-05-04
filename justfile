@@ -10,7 +10,7 @@ test TARGET:
 
 # Run the full pressure gate
 test-all:
-    PYTHONPATH="packages/quarry-core/src:packages/quarry-connectors/src:packages/quarry-operators/src:packages/quarry-registry/src:packages/quarry-cli/src" uv run pytest tests/pressure_test/ -v
+    PYTHONPATH="packages/quarry-core/src:packages/quarry-connectors/src:packages/quarry-operators/src:packages/quarry-registry/src:packages/quarry-cli/src" uv run pytest tests/pressure_test/ packages/quarry-connectors/tests/ -v
 
 # Run a specific test file
 test-file FILE:
@@ -18,7 +18,7 @@ test-file FILE:
 
 # Run tests quietly (CI mode)
 test-all-quiet:
-    PYTHONPATH="packages/quarry-core/src:packages/quarry-connectors/src:packages/quarry-operators/src:packages/quarry-registry/src:packages/quarry-cli/src" uv run pytest tests/pressure_test/ -q
+    PYTHONPATH="packages/quarry-core/src:packages/quarry-connectors/src:packages/quarry-operators/src:packages/quarry-registry/src:packages/quarry-cli/src" uv run pytest tests/pressure_test/ packages/quarry-connectors/tests/ -q
 
 # Lint all packages
 lint:
@@ -48,4 +48,4 @@ tree:
 # Show test counts
 stats:
     @echo "Pressure tests:"
-    @PYTHONPATH="packages/quarry-core/src:packages/quarry-connectors/src:packages/quarry-operators/src:packages/quarry-registry/src:packages/quarry-cli/src" uv run pytest tests/pressure_test/ --collect-only -q 2>/dev/null | tail -1
+    @PYTHONPATH="packages/quarry-core/src:packages/quarry-connectors/src:packages/quarry-operators/src:packages/quarry-registry/src:packages/quarry-cli/src" uv run pytest tests/pressure_test/ packages/quarry-connectors/tests/ --collect-only -q 2>/dev/null | tail -1

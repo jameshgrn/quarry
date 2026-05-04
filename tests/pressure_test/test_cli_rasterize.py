@@ -221,6 +221,12 @@ class TestRunRasterize:
         assert rc == 1
         assert "FAILED:" in capsys.readouterr().err
 
+        registry = Registry(workspace)
+        runs = registry.list_runs()
+        assert len(runs) == 1
+        assert runs[0].operator_name == "rasterize_vector"
+        assert runs[0].status.value == "failed"
+
 
 # ---------------------------------------------------------------------------
 # Burn modes
@@ -329,25 +335,30 @@ class TestBurnModes:
 
 
 class TestEmptyInput:
-    def test_empty_vector_raises(self, empty_vector_path, workspace):
-        """Empty vector can't be materialized (fiona can't compute bounds) → raises."""
-        with pytest.raises(Exception, match="bounds|Driver"):
-            main(
-                [
-                    "run",
-                    "rasterize",
-                    "--vector",
-                    str(empty_vector_path),
-                    "--workspace",
-                    str(workspace),
-                    "--resolution",
-                    "1.0",
-                    "--extent",
-                    "0,0,10,10",
-                    "--nodata",
-                    "-1.0",
-                ]
-            )
+    def test_empty_vector_with_extent_rasterizes_nodata(self, empty_vector_path, workspace):
+        """Empty vector plus explicit extent is valid and produces a nodata raster."""
+        rc = main(
+            [
+                "run",
+                "rasterize",
+                "--vector",
+                str(empty_vector_path),
+                "--workspace",
+                str(workspace),
+                "--resolution",
+                "1.0",
+                "--extent",
+                "0,0,10,10",
+                "--nodata",
+                "-1.0",
+            ]
+        )
+        assert rc == 0
+
+        output_tif = workspace / "rasterize" / "rasterized.tif"
+        with rasterio.open(output_tif) as src:
+            data = src.read(1)
+        assert np.all(data == -1.0)
 
 
 # ---------------------------------------------------------------------------

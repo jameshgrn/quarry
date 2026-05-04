@@ -3,7 +3,7 @@
 Lane: example (exercises connector, operator, executor, flow, registry)
 
 Demonstrates the full Quarry substrate:
-  1. INGEST  — create synthetic DEM + zone polygons, materialize via LocalFileConnector
+  1. INGEST  — create synthetic DEM + zone polygons, materialize through the default router
   2. PROCESS — fill depressions, compute D8 flow direction, compute flow accumulation
   3. ANALYZE — compute zonal statistics of flow accumulation per zone polygon
   4. EXPORT  — normalize flow accumulation raster to COG
@@ -25,14 +25,9 @@ from pathlib import Path
 import fiona
 import numpy as np
 import rasterio
-from quarry_connectors.cog import COGConnector
-from quarry_connectors.duckdb_connector import DuckDBConnector
-from quarry_connectors.local_file import LocalFileConnector
-from quarry_connectors.postgis import PostGISConnector
-from quarry_connectors.stac import STACConnector
+from quarry_connectors.router import build_default_router
 from quarry_core.executors.local import LocalExecutor
-from quarry_core.router import ConnectorRouter
-from quarry_core.source_ref import SourceRef, SourceRefKind
+from quarry_core.source_ref import SourceRef
 from quarry_operators.build_cog import BuildCOGOperator, BuildCOGParams
 from quarry_operators.hydrology_flow import HydrologyFlow, HydrologyFlowParams
 from quarry_operators.zonal_stats import ZonalStatsOperator, ZonalStatsParams
@@ -130,52 +125,21 @@ def main() -> None:
     dem_path = create_synthetic_dem(data_dir / "dem.tif")
     zones_path = create_zone_polygons(data_dir / "zones.gpkg")
 
-    # Materialize artifacts through ConnectorRouter
-    # Full router configuration matching CLI — all connectors registered
-    router = ConnectorRouter()
-    # COGConnector has priority 0 for raster routing (higher priority than LocalFile)
-    router.register(
-        COGConnector(),
-        priority=0,
-        kinds=[SourceRefKind.LOCAL_RASTER, SourceRefKind.REMOTE_URI],
-    )
-    # STACConnector handles STAC catalogs and items (configurable via env var)
+    # Materialize artifacts through the canonical default router.
     stac_api = os.environ.get("STAC_API_URL", "https://earth-search.aws.element84.com/v0")
-    router.register(
-        STACConnector(api_url=stac_api),
-        priority=0,
-        kinds=[SourceRefKind.CATALOG_ITEM],
-    )
-    # PostGISConnector handles database references
-    router.register(
-        PostGISConnector(),
-        priority=0,
-        kinds=[SourceRefKind.DATABASE_REF],
-    )
-    # DuckDBConnector handles DuckDB database files
-    router.register(
-        DuckDBConnector(),
-        priority=0,
-        kinds=[SourceRefKind.DUCKDB],
-    )
-    # LocalFileConnector is fallback with priority 10
-    router.register(
-        LocalFileConnector(),
-        priority=10,
-        kinds=[SourceRefKind.LOCAL_PATH, SourceRefKind.LOCAL_RASTER, SourceRefKind.LOCAL_VECTOR],
-    )
+    router = build_default_router(stac_api_url=stac_api)
 
     dem_source = SourceRef.local(str(dem_path))
     dem_match = router.select_one(dem_source)
     if not dem_match:
         raise ValueError(f"No connector found for {dem_source}")
-    dem_result = dem_match.connector.materialize(str(dem_path), workspace)
+    dem_result = dem_match.connector.materialize(dem_source.raw, workspace)
 
     zones_source = SourceRef.local(str(zones_path))
     zones_match = router.select_one(zones_source)
     if not zones_match:
         raise ValueError(f"No connector found for {zones_source}")
-    zones_result = zones_match.connector.materialize(str(zones_path), workspace)
+    zones_result = zones_match.connector.materialize(zones_source.raw, workspace)
 
     dem_artifact = dem_result.artifact
     zones_artifact = zones_result.artifact

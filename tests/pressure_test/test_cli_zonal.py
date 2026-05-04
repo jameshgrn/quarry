@@ -362,6 +362,12 @@ class TestRunZonalErrors:
         assert rc == 1
         assert "FAILED:" in capsys.readouterr().err
 
+        registry = Registry(workspace)
+        runs = registry.list_runs()
+        assert len(runs) == 1
+        assert runs[0].operator_name == "zonal_stats"
+        assert runs[0].status.value == "failed"
+
     def test_invalid_checks_return_2(self, raster_path, zones_path, workspace, monkeypatch, capsys):
         monkeypatch.setattr(
             "quarry_core.executors.local.LocalExecutor.submit",

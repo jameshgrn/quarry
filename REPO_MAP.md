@@ -26,11 +26,36 @@ quarry/                          # Monorepo root
 │   │
 │   ├── quarry-connectors/       # Deps: rasterio, fiona, pystac-client, psycopg, shapely
 │   │   └── src/quarry_connectors/
-│   │       ├── local_file.py    # LocalFileConnector (raster + vector, eager + lazy)
-│   │       ├── stac.py          # STACConnector (catalog search, asset selection, lazy/eager)
-│   │       ├── postgis.py       # PostGISConnector (schema.table, queries, geometry/non-geometry)
-│   │       ├── cog.py           # COGConnector (local/remote COG, validation, I/O metrics)
-│   │       └── duckdb_connector.py # DuckDBConnector (path.duckdb::table, geometry/non-geometry)
+│   │       ├── cog.py              # COGConnector (local/remote COG, validation)
+│   │       ├── csv_xy.py           # CSVXYConnector (CSV coordinates)
+│   │       ├── duckdb_connector.py # DuckDBConnector (path.duckdb::table/query)
+│   │       ├── excel_xy.py         # ExcelXYConnector (spreadsheet coordinates)
+│   │       ├── flatgeobuf.py       # FlatGeobufConnector
+│   │       ├── fof_stack.py        # FOFStackConnector
+│   │       ├── geojsonseq.py       # GeoJSONSeqConnector
+│   │       ├── geopackage.py       # GeoPackageConnector
+│   │       ├── geoparquet.py       # GeoParquetConnector
+│   │       ├── gpx.py              # GPXConnector
+│   │       ├── hdf5.py             # HDF5Connector
+│   │       ├── kmz.py              # KMZConnector
+│   │       ├── las.py              # LASPointCloudConnector
+│   │       ├── local_file.py       # LocalFileConnector
+│   │       ├── mbtiles.py          # MBTilesConnector
+│   │       ├── netcdf.py           # NetCDFConnector
+│   │       ├── object_store.py     # ObjectStoreConnector
+│   │       ├── ogc_services.py     # OGCServicesConnector
+│   │       ├── opentopography.py   # OpenTopographyConnector
+│   │       ├── overture.py         # OvertureConnector
+│   │       ├── pixc.py             # PIXCConnector
+│   │       ├── postgis.py          # PostGISConnector
+│   │       ├── router.py           # Default ConnectorRouter registrations
+│   │       ├── sentinel2.py        # Sentinel2Connector
+│   │       ├── shapefile.py        # ShapefileConnector
+│   │       ├── slc.py              # SLCConnector
+│   │       ├── spatialite.py       # SpatiaLiteConnector
+│   │       ├── stac.py             # STACConnector
+│   │       ├── topojson.py         # TopoJSONConnector
+│   │       └── zarr_connector.py   # ZarrConnector
 │   │
 │   ├── quarry-operators/        # Deps: rasterio, fiona, shapely
 │   │   └── src/quarry_operators/
@@ -39,8 +64,12 @@ quarry/                          # Monorepo root
 │   │       ├── fill_depressions.py  # FillDepressionsOperator (Priority-Flood DEM preprocessing)
 │   │       ├── slope.py             # SlopeOperator (terrain slope from DEM)
 │   │       ├── aspect.py            # AspectOperator (terrain aspect from DEM)
+│   │       ├── hillshade.py         # HillshadeOperator (terrain illumination)
 │   │       ├── d8_flow_direction.py # D8FlowDirectionOperator (steepest descent + flat resolution)
 │   │       ├── flow_accumulation.py # FlowAccumulationOperator (toposort upstream area)
+│   │       ├── geocode_slc.py       # GeocodeSLCOperator
+│   │       ├── slc_calibration.py   # SLCCalibrationOperator
+│   │       ├── water_elevation_mosaic.py # WaterElevationMosaicOperator
 │   │       ├── zonal_stats.py       # ZonalStatsOperator (raster+vector → per-zone CSV stats)
 │   │       ├── spatial_join.py      # SpatialJoinOperator (vector×vector left join, intersects)
 │   │       ├── sample_raster.py     # SampleRasterOperator (raster+points → per-point CSV values)
@@ -55,40 +84,16 @@ quarry/                          # Monorepo root
 │   │
 │   └── quarry-cli/              # Deps: quarry-core + connectors + operators + registry
 │       └── src/quarry_cli/
-│           └── main.py          # argparse CLI: artifacts list/show, lineage, run hydrology/zonal
+│           └── main.py          # argparse CLI: inspect registry, run flows/operators
 │
 ├── tests/
-│   ├── pressure_test/           # Substrate pressure tests (652 tests, 30 suites)
-│   │   ├── conftest.py          # PYTHONPATH setup for dev
-│   │   ├── test_end_to_end.py   # Kernel: connector → operator → executor (15)
-│   │   ├── test_registry.py     # Registry round-trips (18)
-│   │   ├── test_stac_connector.py # STAC adversarial (22)
-│   │   ├── test_reproject.py    # Reproject stress (19)
-│   │   ├── test_postgis_connector.py # PostGIS adversarial (25)
-│   │   ├── test_cog_connector.py # COG adversarial (24)
-│   │   ├── test_source_ref.py  # SourceRef contract (34)
-│   │   ├── test_connector_router.py # ConnectorRouter routing (34)
-│   │   ├── test_fill_depressions.py # FillDepressions hydrology op (30)
-│   │   ├── test_slope.py            # Slope terrain op (31)
-│   │   ├── test_aspect.py           # Aspect terrain op (28)
-│   │   ├── test_d8_flow_direction.py # D8 flow direction + chain tests (27)
-│   │   ├── test_flow_accumulation.py # Flow accumulation + full chain (27)
-│   │   ├── test_hydrology_flow.py # Hydrology chain composition (27+15)
-│   │   ├── test_hydrology_adversarial.py # 27 pathological DEM fixtures
-│   │   ├── test_internal_outlet_check.py # Standalone check tests
-│   │   ├── test_zonal_stats.py  # ZonalStats raster+vector (21)
-│   │   ├── test_sample_raster.py # SampleRaster raster+points (22)
-│   │   ├── test_spatial_join.py # SpatialJoin vector×vector (20)
-│   │   ├── test_build_cog.py   # BuildCOG normalization (22)
-│   │   ├── test_rasterize_vector.py # RasterizeVector polygon→raster (25)
-│   │   ├── test_cli.py          # CLI adapter: list/show/lineage/run hydrology (19)
-│   │   ├── test_cli_zonal.py    # CLI adapter: run zonal end-to-end (12)
-│   │   ├── test_cli_inspection.py # CLI adapter: runs list/show, checks show (20)
-│   │   ├── test_cli_sample.py   # CLI adapter: run sample end-to-end (19)
-│   │   ├── test_cli_rasterize.py # CLI adapter: run rasterize end-to-end (26)
-│   │   ├── test_router_integration.py # ConnectorRouter integration across all connectors (15)
-│   │   └── test_duckdb_connector.py # DuckDB connector: table/query/spatial/lazy/discover (42)
+│   ├── pressure_test/           # Substrate pressure tests; use `just stats` for current count
+│   │   ├── test_*_connector.py  # Connector pressure tests
+│   │   ├── test_*.py            # Operator, flow, adapter, registry, router tests
+│   │   └── conftest.py          # PYTHONPATH setup for dev
 │   └── fixtures/                # Test data (gitignored binaries)
+│
+├── packages/quarry-connectors/tests/ # Connector pressure tests included by pytest.ini
 │
 ├── examples/
 │   └── watershed_analysis.py    # Canonical end-to-end: ingest→hydro→zonal→COG→lineage

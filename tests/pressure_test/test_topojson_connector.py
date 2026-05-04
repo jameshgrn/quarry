@@ -278,7 +278,7 @@ class TestTopoJSONEagerLocal:
 
         assert result.artifact.metadata["object_name"] == "places"
         assert result.artifact.metadata["object_type"] == "GeometryCollection"
-        assert result.artifact.metadata["feature_count"] == 3
+        assert result.artifact.spatial.feature_count == 3
         assert result.artifact.metadata["assumed_crs"] is True
         assert "Point" in result.artifact.metadata["geometry_types"]
 

@@ -386,7 +386,113 @@ class TestRegistrationIntrospection:
 
 
 # ---------------------------------------------------------------------------
-# 10. Edge cases
+# 10. Source-shape filters
+# ---------------------------------------------------------------------------
+
+
+class TestSourceShapeFilters:
+    """Registrations can narrow broad SourceRefKind matches without new kinds."""
+
+    def test_extension_filter_selects_specialized_connector(self):
+        router = ConnectorRouter()
+        shapefile = StubConnector("shapefile")
+        local = StubConnector("local_file")
+        router.register(
+            shapefile,
+            kinds={SourceRefKind.LOCAL_VECTOR},
+            priority=0,
+            extensions={".shp"},
+        )
+        router.register(local, kinds={SourceRefKind.LOCAL_VECTOR}, priority=10)
+
+        matches = router.select("/data/watersheds.shp")
+
+        assert [match.connector.name for match in matches] == ["shapefile", "local_file"]
+
+    def test_extension_filter_rejects_wrong_vector_extension(self):
+        router = ConnectorRouter()
+        shapefile = StubConnector("shapefile")
+        local = StubConnector("local_file")
+        router.register(
+            shapefile,
+            kinds={SourceRefKind.LOCAL_VECTOR},
+            priority=0,
+            extensions={"shp"},
+        )
+        router.register(local, kinds={SourceRefKind.LOCAL_VECTOR}, priority=10)
+
+        matches = router.select("/data/watersheds.geojson")
+
+        assert [match.connector.name for match in matches] == ["local_file"]
+
+    def test_extension_filter_reads_before_connector_suffix(self):
+        router = ConnectorRouter()
+        gpkg = StubConnector("geopackage")
+        router.register(
+            gpkg,
+            kinds={SourceRefKind.LOCAL_VECTOR},
+            priority=0,
+            extensions={".gpkg"},
+        )
+
+        match = router.select_one("/data/watersheds.gpkg::huc12")
+
+        assert match.connector.name == "geopackage"
+
+    def test_scheme_filter_selects_remote_object_connector(self):
+        router = ConnectorRouter()
+        obj = StubConnector("object_store")
+        router.register(
+            obj,
+            kinds={SourceRefKind.REMOTE_URI},
+            priority=0,
+            schemes={"s3", "gs"},
+        )
+
+        assert router.select_one("s3://bucket/data.gpkg").connector.name == "object_store"
+        assert router.select("https://example.com/data.gpkg") == []
+
+    def test_prefix_filter_selects_service_connector(self):
+        router = ConnectorRouter()
+        ogc = StubConnector("ogc_services")
+        stac = StubConnector("stac")
+        router.register(
+            ogc,
+            kinds={SourceRefKind.CATALOG_ITEM, SourceRefKind.UNKNOWN},
+            priority=0,
+            prefixes={"wms::", "wfs::"},
+        )
+        router.register(stac, kinds={SourceRefKind.CATALOG_ITEM}, priority=10)
+
+        matches = router.select("wms::https://example.com/wms::layer")
+
+        assert [match.connector.name for match in matches] == ["ogc_services", "stac"]
+
+    def test_extension_priority_beats_remote_fallback(self):
+        router = ConnectorRouter()
+        cog = StubConnector("cog")
+        obj = StubConnector("object_store")
+        router.register(
+            cog,
+            kinds={SourceRefKind.REMOTE_URI},
+            priority=0,
+            extensions={".tif", ".tiff"},
+            schemes={"s3"},
+        )
+        router.register(
+            obj,
+            kinds={SourceRefKind.REMOTE_URI},
+            priority=50,
+            schemes={"s3"},
+        )
+
+        matches = router.select("s3://bucket/dem.tif")
+
+        assert [match.connector.name for match in matches] == ["cog", "object_store"]
+
+
+# ---------------------------------------------------------------------------
+# 11. Edge cases
 # ---------------------------------------------------------------------------
 
 

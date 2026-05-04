@@ -17,6 +17,8 @@ quarry-cli = { workspace = true }
 
 [dependency-groups]
 dev = [
+    "h5py>=3.8.0",
+    "laspy>=2.0.0",
     "matplotlib>=3.10.8",
     "netcdf4>=1.7.3",
     "openpyxl>=3.1.5",
