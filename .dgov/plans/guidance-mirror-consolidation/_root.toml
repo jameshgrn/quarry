@@ -1,0 +1,4 @@
+[plan]
+name = "guidance-mirror-consolidation"
+summary = "Make AGENTS.md the single canonical guidance and turn CLAUDE.md and GEMINI.md into symlinks so dgov's mirror-drift gate passes without ongoing sync burden."
+sections = ["tasks"]
