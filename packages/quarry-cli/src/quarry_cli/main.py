@@ -353,6 +353,87 @@ def cmd_checks_show(args) -> int:
 
 
 # ---------------------------------------------------------------------------
+# route
+# ---------------------------------------------------------------------------
+
+
+def cmd_route(args) -> int:
+    """Show inferred SourceRef and ranked connector matches for a source string."""
+    from quarry_core.router import RegistrationView
+
+    # Build router
+    router = _get_router()
+
+    # Resolve source via inference
+    raw = args.source
+    try:
+        ref = SourceRef.infer(raw)
+    except Exception as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 1
+
+    # Print Source section
+    print("Source")
+    print("------")
+    print(f"  raw: {raw}")
+    print(f"  kind: {ref.kind.value}")
+    if ref.params:
+        print(f"  params: {ref.params}")
+    print()
+
+    # Get matches
+    matches = router.select(ref)
+
+    # Build registration lookup for policy surface details
+    reg_views = list(router.registrations)
+
+    def find_view(connector_name: str, kind) -> RegistrationView | None:
+        """Find the registration view that matches both connector and kind."""
+        for view in reg_views:
+            if view.connector_name == connector_name and kind in view.kinds:
+                return view
+        # Fallback: first view with matching connector name
+        for view in reg_views:
+            if view.connector_name == connector_name:
+                return view
+        return None
+
+    # Print Matches section
+    print("Matches")
+    print("-------")
+    if not matches:
+        print("  (none)")
+    else:
+        for match in matches:
+            view = find_view(match.connector.name, ref.kind)
+            if view is None:
+                kinds_str = "-"
+                ext_str = "-"
+                scheme_str = "-"
+                prefix_str = "-"
+            else:
+                kinds_str = ",".join(sorted(k.value for k in view.kinds)) if view.kinds else "-"
+                ext_str = ",".join(sorted(view.extensions)) if view.extensions else "-"
+                scheme_str = ",".join(sorted(view.schemes)) if view.schemes else "-"
+                prefix_str = ",".join(sorted(view.prefixes)) if view.prefixes else "-"
+            print(
+                f"  [{match.rank}] {match.connector.name} ({match.reason.value}) — "
+                f"kinds={kinds_str}, ext={ext_str}, scheme={scheme_str}, prefix={prefix_str}"
+            )
+    print()
+
+    # Print Selected section
+    print("Selected")
+    print("--------")
+    if matches:
+        print(f"  {matches[0].connector.name}")
+    else:
+        print("  (no connector — NoConnectorError would be raised at materialize time)")
+
+    return 0 if matches else 2
+
+
+# ---------------------------------------------------------------------------
 # run hydrology
 # ---------------------------------------------------------------------------
 
@@ -892,6 +973,13 @@ def build_parser() -> argparse.ArgumentParser:
     lin_parser.add_argument("artifact_id", help="Artifact ID")
     lin_parser.add_argument("--workspace", default=".", help="Workspace directory (default: .)")
     lin_parser.set_defaults(func=cmd_lineage)
+
+    # --- route ---
+    route_parser = subparsers.add_parser(
+        "route", help="Show inferred SourceRef and ranked connector matches for a source string"
+    )
+    route_parser.add_argument("source", help="Source string (path, URI, STAC reference, etc.)")
+    route_parser.set_defaults(func=cmd_route)
 
     # --- runs ---
     runs_parser = subparsers.add_parser("runs", help="Inspect run records")
