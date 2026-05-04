@@ -8,7 +8,7 @@ Orient:
 - Constraint: do NOT change `_Registration` (private), the `register()` signature, the `select()`/`select_one()` behavior, or `MatchReason`. Behavioral surface is read-only introspection only.
 - Constraint: keep `registrations` as a `@property` on `ConnectorRouter` (callers depend on attribute access).
 - Lane declaration: registry (router introspection) + check (test update).
-- HARD BOUNDARY: this task may ONLY touch (read OR write) `packages/quarry-core/src/quarry_core/router.py` and `tests/pressure_test/test_connector_router.py`. Do NOT open, read, or modify any other file via your tools — not other test files, not other packages, not docs. The settlement gate will run the full pressure suite to confirm no broader regression; you do not need to verify other files yourself. If a gate failure cites a file outside this pair, the diagnosis is wrong; re-read the error and look for the real cause inside the two writable files.
+- HARD BOUNDARY: only `packages/quarry-core/src/quarry_core/router.py` and `tests/pressure_test/test_connector_router.py` may be MODIFIED. `tests/pressure_test/test_router_integration.py` and `tests/pressure_test/test_policy_surface.py` are claimed only to permit read access for self-verification — they MUST remain byte-identical to their HEAD state. dgov diffs your final commit; any line change in those two files is a contract violation. Do NOT touch any file outside the four-file claim list at all.
 - HARD BOUNDARY: this repo runs Python 3.11+ (current interpreter is 3.11.6). `tomllib` is in the stdlib. Do NOT add a `tomli` fallback or any `try/except ModuleNotFoundError` import shim anywhere — there is no Python 3.10 path to support.
 
 Edit:
@@ -37,4 +37,6 @@ self_review = true
 files.edit = [
   "packages/quarry-core/src/quarry_core/router.py",
   "tests/pressure_test/test_connector_router.py",
+  "tests/pressure_test/test_router_integration.py",
+  "tests/pressure_test/test_policy_surface.py",
 ]

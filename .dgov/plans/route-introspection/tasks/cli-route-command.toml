@@ -8,7 +8,7 @@ Orient:
 - Read `tests/pressure_test/test_cli_zonal.py` for the canonical CLI-pressure-test fixture pattern (subprocess-free invocation via `quarry_cli.main.main`, `capsys`, exit-code assertions).
 - Lane: adapter (cli) + check (test). One logical commit.
 - Doctrine: this command is read-only. It MUST NOT materialize, MUST NOT touch the registry, MUST NOT write workspace artifacts. Pure introspection.
-- HARD BOUNDARY: this task may ONLY touch (read OR write) the four files in its claim: the two writable files plus the three read-only context files (`packages/quarry-core/src/quarry_core/router.py`, `packages/quarry-connectors/src/quarry_connectors/router.py`, `tests/pressure_test/test_cli_zonal.py`). Do NOT open any other test files, source files, or docs via your tools. The settlement gate runs the full pressure suite — trust it; do not run extra files yourself.
+- HARD BOUNDARY: of the files claimed in this task, only `packages/quarry-cli/src/quarry_cli/main.py` may be MODIFIED, and `tests/pressure_test/test_cli_route.py` is being CREATED. The other three claimed files (`packages/quarry-core/src/quarry_core/router.py`, `packages/quarry-connectors/src/quarry_connectors/router.py`, `tests/pressure_test/test_cli_zonal.py`) are claimed only to permit read access for context — they MUST remain byte-identical to their HEAD state. dgov diffs your final commit; any line change in those three files is a contract violation. Do NOT touch any file outside the five-file claim list at all.
 
 Edit:
 1. In `packages/quarry-cli/src/quarry_cli/main.py`:
@@ -45,10 +45,10 @@ commit_message = "quarry-cli: add route subcommand for connector routing introsp
 self_review = true
 depends_on = ["tasks/extend-router-introspection.extend-router-introspection"]
 
-files.edit = ["packages/quarry-cli/src/quarry_cli/main.py"]
-files.create = ["tests/pressure_test/test_cli_route.py"]
-files.read = [
+files.edit = [
+  "packages/quarry-cli/src/quarry_cli/main.py",
   "packages/quarry-core/src/quarry_core/router.py",
   "packages/quarry-connectors/src/quarry_connectors/router.py",
   "tests/pressure_test/test_cli_zonal.py",
 ]
+files.create = ["tests/pressure_test/test_cli_route.py"]
