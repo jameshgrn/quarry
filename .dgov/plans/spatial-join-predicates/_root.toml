@@ -1,4 +1,0 @@
-[plan]
-name = "spatial-join-predicates"
-summary = "Extend SpatialJoinOperator to accept the contains, within, and touches predicates in addition to intersects, dispatching to shapely PreparedGeometry methods."
-sections = ["tasks"]
