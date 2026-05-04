@@ -1,4 +1,0 @@
-[plan]
-name = "route-introspection"
-summary = "Make connector routing decisions inspectable from the CLI; clear preflight by mirroring agent guidance to GEMINI.md."
-sections = ["tasks"]
