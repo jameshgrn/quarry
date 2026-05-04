@@ -4,10 +4,12 @@ Lane: registry
 
 Given a SourceRef (or raw string), returns ranked eligible connectors.
 No execution — only selection. Connectors are registered with explicit
-kind-affinity declarations so the router never guesses.
+kind-affinity declarations and optional source-shape filters so the router
+never guesses.
 
 Design:
 - Connectors declare what SourceRefKinds they handle via registration
+- Registrations can narrow matches by file extension, URI scheme, or raw prefix
 - Router ranks candidates by specificity (exact kind match > fallback)
 - Ambiguity is surfaced, not hidden — multiple matches are valid
 - Raw strings are auto-inferred via SourceRef.infer()
@@ -16,8 +18,11 @@ Design:
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
+from urllib.parse import urlsplit
 
 from quarry_core.connector import Connector
 from quarry_core.source_ref import SourceRef, SourceRefKind
@@ -58,6 +63,64 @@ class _Registration:
     kinds: frozenset[SourceRefKind]
     priority: int  # Lower = higher priority within same kind
     fallback: bool  # Accept UNKNOWN refs as last resort
+    extensions: frozenset[str]
+    schemes: frozenset[str]
+    prefixes: frozenset[str]
+
+
+def _normalize_extensions(extensions: Iterable[str] | None) -> frozenset[str]:
+    if extensions is None:
+        return frozenset()
+    normalized: set[str] = set()
+    for ext in extensions:
+        value = ext.lower()
+        if not value.startswith("."):
+            value = f".{value}"
+        normalized.add(value)
+    return frozenset(normalized)
+
+
+def _normalize_schemes(schemes: Iterable[str] | None) -> frozenset[str]:
+    if schemes is None:
+        return frozenset()
+    return frozenset(scheme.lower().removesuffix("://").rstrip(":") for scheme in schemes)
+
+
+def _normalize_prefixes(prefixes: Iterable[str] | None) -> frozenset[str]:
+    if prefixes is None:
+        return frozenset()
+    return frozenset(prefix.lower() for prefix in prefixes)
+
+
+def _source_extension(ref: SourceRef) -> str:
+    target = ref.params.get("path") or ref.params.get("url") or ref.params.get("db_path") or ref.raw
+    source = str(target).strip()
+    if "::" in source:
+        source = source.split("::", 1)[0]
+    if "://" in source:
+        source = urlsplit(source).path
+    else:
+        source = source.split("?", 1)[0].split("#", 1)[0]
+    return Path(source.rstrip("/")).suffix.lower()
+
+
+def _source_scheme(ref: SourceRef) -> str:
+    scheme = ref.params.get("scheme")
+    if scheme is not None:
+        return str(scheme).lower().removesuffix("://").rstrip(":")
+    if "://" not in ref.raw:
+        return ""
+    return ref.raw.split("://", 1)[0].lower()
+
+
+def _matches_filters(ref: SourceRef, reg: _Registration) -> bool:
+    if reg.extensions and _source_extension(ref) not in reg.extensions:
+        return False
+    if reg.schemes and _source_scheme(ref) not in reg.schemes:
+        return False
+    if reg.prefixes and not any(ref.raw.lower().startswith(prefix) for prefix in reg.prefixes):
+        return False
+    return True
 
 
 class ConnectorRouter:
@@ -88,9 +151,12 @@ class ConnectorRouter:
         self,
         connector: Connector,
         *,
-        kinds: set[SourceRefKind],
+        kinds: Iterable[SourceRefKind],
         priority: int = 5,
         fallback: bool = False,
+        extensions: Iterable[str] | None = None,
+        schemes: Iterable[str] | None = None,
+        prefixes: Iterable[str] | None = None,
     ) -> None:
         """Register a connector with its routing metadata.
 
@@ -100,6 +166,9 @@ class ConnectorRouter:
             priority: Lower = preferred when multiple connectors match the same kind.
                       Default 5. COG might be 0, LocalFile 10.
             fallback: If True, this connector is also eligible for UNKNOWN refs.
+            extensions: Optional file extensions this registration accepts.
+            schemes: Optional URI schemes this registration accepts.
+            prefixes: Optional raw source prefixes this registration accepts.
         """
         self._registrations.append(
             _Registration(
@@ -107,6 +176,9 @@ class ConnectorRouter:
                 kinds=frozenset(kinds),
                 priority=priority,
                 fallback=fallback,
+                extensions=_normalize_extensions(extensions),
+                schemes=_normalize_schemes(schemes),
+                prefixes=_normalize_prefixes(prefixes),
             )
         )
 
@@ -124,7 +196,7 @@ class ConnectorRouter:
 
         matches: list[ConnectorMatch] = []
         for reg in self._registrations:
-            if ref.kind in reg.kinds:
+            if ref.kind in reg.kinds and _matches_filters(ref, reg):
                 matches.append(
                     ConnectorMatch(
                         connector=reg.connector,
@@ -132,7 +204,7 @@ class ConnectorRouter:
                         rank=reg.priority,
                     )
                 )
-            elif ref.kind == SourceRefKind.UNKNOWN and reg.fallback:
+            elif ref.kind == SourceRefKind.UNKNOWN and reg.fallback and _matches_filters(ref, reg):
                 matches.append(
                     ConnectorMatch(
                         connector=reg.connector,

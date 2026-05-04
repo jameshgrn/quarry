@@ -41,7 +41,6 @@ def _write_raster(path: Path, data: np.ndarray, bands: int = 1) -> Artifact:
     """Write array to GeoTIFF and return an Artifact pointing to it."""
     if data.ndim == 2:
         height, width = data.shape
-        band_data = data[np.newaxis, ...]
     else:
         bands, height, width = data.shape
 

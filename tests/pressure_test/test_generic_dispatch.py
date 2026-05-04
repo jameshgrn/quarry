@@ -3,7 +3,7 @@
 Lane: adapter
 
 Exercises:
-  - Operator registry: all 12 names registered, name↔class match, lazy import
+  - Operator registry: current ontology names registered, name↔class match, lazy import
   - Param coercion: str, int, float, bool, Optional, list, tuple, Literal
   - Generic dispatch end-to-end: slope, zonal_stats, rasterize_vector, reproject,
     spatial_join, build_cog, clip_raster
@@ -27,8 +27,9 @@ import fiona
 import numpy as np
 import pytest
 import rasterio
-from quarry_cli.main import _build_params, _coerce_value, main
+from quarry_cli.main import _build_params, _coerce_value, _source_ref_from_cli, main
 from quarry_core.artifact import ArtifactType
+from quarry_core.source_ref import SourceRefKind
 from quarry_operators.registry import OPERATOR_NAMES, get_operator, get_params_class
 from quarry_registry.registry import Registry
 from rasterio.crs import CRS
@@ -145,8 +146,25 @@ def polygons_path(workspace):
 
 
 class TestOperatorRegistry:
-    def test_all_thirteen_names_registered(self):
-        assert len(OPERATOR_NAMES) == 13
+    def test_all_operator_names_registered(self):
+        assert set(OPERATOR_NAMES) == {
+            "aspect",
+            "build_cog",
+            "clip_raster",
+            "d8_flow_direction",
+            "fill_depressions",
+            "flow_accumulation",
+            "geocode_slc",
+            "hillshade",
+            "rasterize_vector",
+            "reproject",
+            "sample_raster",
+            "slc_calibrate",
+            "slope",
+            "spatial_join",
+            "water_elevation_mosaic",
+            "zonal_stats",
+        }
 
     def test_operator_names_match_classes(self):
         for name in OPERATOR_NAMES:
@@ -278,6 +296,18 @@ class TestBuildParams:
 
         result = _build_params(FillDepressionsParams, {"apply_gradient": "false"}, "/tmp/out.tif")
         assert result.apply_gradient is False
+
+
+class TestCLISourceRefs:
+    def test_existing_bare_local_table_path_is_local(self, workspace, monkeypatch):
+        points = workspace / "points.csv"
+        points.write_text("x,y\n1,2\n")
+        monkeypatch.chdir(workspace)
+
+        ref = _source_ref_from_cli("points.csv", "Input")
+
+        assert ref.kind == SourceRefKind.LOCAL_PATH
+        assert ref.raw == str(points.resolve())
 
 
 # ===========================================================================
@@ -565,6 +595,28 @@ class TestGenericDispatchRegistry:
         assert len(runs) == 1
         assert runs[0].operator_name == "slope"
         assert runs[0].status.value == "completed"
+
+    def test_failed_run_persisted(self, dem_path, workspace, capsys):
+        rc = main(
+            [
+                "run",
+                "rasterize_vector",
+                "--input",
+                str(dem_path),
+                "--workspace",
+                str(workspace),
+                "-p",
+                "resolution=1.0,1.0",
+            ]
+        )
+        assert rc == 1
+        assert "FAILED:" in capsys.readouterr().err
+
+        registry = Registry(workspace)
+        runs = registry.list_runs()
+        assert len(runs) == 1
+        assert runs[0].operator_name == "rasterize_vector"
+        assert runs[0].status.value == "failed"
 
     def test_lineage_correct(self, dem_path, workspace):
         rc = main(

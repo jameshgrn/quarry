@@ -64,7 +64,10 @@ def _freeze_params(params: Mapping[str, Any]) -> Mapping[str, Any]:
 
 def _freeze_metadata(metadata: Mapping[str, Any]) -> Mapping[str, Any]:
     """Freeze artifact metadata so copies cannot alias mutable nested state."""
-    return MappingProxyType({k: _freeze_value(v) for k, v in metadata.items()})
+    spatial_keys = {"crs", "extent", "bounds", "resolution", "feature_count", "band_count"}
+    return MappingProxyType(
+        {k: _freeze_value(v) for k, v in metadata.items() if k not in spatial_keys}
+    )
 
 
 @dataclass(frozen=True)

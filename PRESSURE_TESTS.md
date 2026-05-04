@@ -601,8 +601,8 @@ operator. Zero contract changes. 464 total tests passing.
 - argparse is sufficient — no click/typer dependency needed
 - CLI is pure glue: 200 lines, zero new abstractions
 
-**Debt observed:**
-- Only HydrologyFlow exposed via `run` — generic operator dispatch deferred
+**Debt observed at the time:**
+- Only HydrologyFlow exposed via `run` — later closed by generic operator dispatch
 - No JSON output mode — plain text tables only for v1
 - No `run list` / `run show` commands — deferred until someone needs run inspection from CLI
 
@@ -885,7 +885,7 @@ operator pattern through CLI. Zero contract changes. 495 total tests passing.
 - Router bypass in CLI — **FIXED**. All entry points now use ConnectorRouter.
 - Router bypass in examples — **FIXED**. `watershed_analysis.py` demonstrates canonical pattern.
 
-**Summary:** Fifteen integration pressure tests. ConnectorRouter abstraction validated across all source types. False states now impossible. 652 total tests passing.
+**Summary:** Fifteen integration pressure tests. ConnectorRouter abstraction validated across default CLI source types. 652 tests passing at the time; current count comes from `just stats`.
 
 ## 29. Registry Integrity Repair (2026-04-22)
 
@@ -953,3 +953,43 @@ operator pattern through CLI. Zero contract changes. 495 total tests passing.
 
 **Summary:** Fifty-one pressure tests. Thirteenth operator (hillshade). Terrain analysis trio
 complete. Zero contract changes.
+
+## 32. Policy Surface Repair (2026-05-02)
+
+**Components:** Artifact metadata, pytest gate, router documentation, repo docs
+**Tests:** targeted lint/collection repair; use `just stats` for current count
+**Contract changes:** None — enforced the existing metadata contract
+
+**Proved:**
+- `Artifact.metadata` no longer carries top-level spatial duplicate keys (`crs`, `extent`, `bounds`, `resolution`, `feature_count`, `band_count`)
+- Package-level connector tests are part of the canonical pytest collection and `just test-all`
+- The default CLI router documentation no longer claims to cover every connector implementation
+- Repo docs now reflect the actual 29-connector, 16-operator surface
+
+**Signals:**
+- Extension-aware connector routing is a real design gap, but broad `SourceRefKind` auto-registration would create false matches
+- Counts drift quickly; docs should prefer `just stats` unless a fixed release snapshot is needed
+
+**Debt observed:**
+- ConnectorRouter still routes by broad source kind only. Specialized connector routing remains deferred until there is a pressure test that forces extension/provider-level selection.
+
+## 33. Extension-Aware ConnectorRouter (2026-05-02)
+
+**Components:** ConnectorRouter, SourceRef inference, default connector router registrations
+**Tests:** targeted router/source_ref integration pressure tests; use `just stats` for current count
+**Contract changes:** None — Connector protocol unchanged, quarry-core remains zero-dep
+
+**Proved:**
+- Router registrations can narrow broad `SourceRefKind` matches by file extension, URI scheme, and raw prefix
+- Connector suffixes such as `/data/layers.gpkg::roads` and `/data/product.h5::/science/elevation` classify and route by the source file extension
+- Default router registration lives in `quarry-connectors`, so CLI and tests share one canonical registration surface
+- Local Shapefile, GeoPackage, CSV/Excel XY, HDF5, NetCDF, Zarr, and TopoJSON refs route to specialized connectors
+- Remote GeoTIFF routes to COG ahead of ObjectStore; remote non-COG object refs route to ObjectStore
+- `wms::`, `wfs::`, `overture://`, and `opentopo://` route to provider connectors ahead of broad STAC routing
+- Ambiguous `.geojson` and `.json` refs stay with LocalFile instead of pretending they identify a specialized connector
+
+**Debt closed:**
+- Broad kind-only ConnectorRouter selection — **FIXED** for source-shape routing.
+
+**Debt retained:**
+- Semantic product connectors (FOFStack, PIXC, SLC, Sentinel2) are not auto-routed by generic extensions/catalog strings because `.h5`, `.nc`, and STAC-shaped refs are not enough proof of product semantics.

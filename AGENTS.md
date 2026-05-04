@@ -52,6 +52,7 @@ Preserve the ontology. Do not invent parallel abstractions.
 - RasterizeVector only tested with polygons — line/point rasterization deferred
 - RasterizeVector single-band only — multi-band output deferred
 - RasterizeVector no all_touched option — deferred until needed
+- Semantic product connectors (FOFStack, PIXC, SLC, Sentinel2) are not auto-routed by generic extensions/catalog strings — require explicit connector use until a semantic SourceRef pressure test forces routing
 
 ## Raiding source: hydrops/
 
@@ -74,11 +75,11 @@ Trimmed 2026-04-23: all dead reports, analysis scripts, demo scripts, CSV/JSON d
 ## Current status
 
 Substrate phase is complete. The current surface:
-- 5 connectors: LocalFile, STAC, PostGIS, COG, DuckDB
-- 12 operators: ClipRaster, Reproject, FillDepressions, Slope, Aspect, D8FlowDirection, FlowAccumulation, ZonalStats, SpatialJoin, BuildCOG, SampleRaster, RasterizeVector
+- 29 connectors: COG, CSVXY, DuckDB, ExcelXY, FlatGeobuf, FOFStack, GeoJSONSeq, GeoPackage, GeoParquet, GPX, HDF5, KMZ, LASPointCloud, LocalFile, MBTiles, NetCDF, ObjectStore, OGCServices, OpenTopography, Overture, PIXC, PostGIS, Sentinel2, Shapefile, SLC, SpatiaLite, STAC, TopoJSON, Zarr
+- 16 operators: Aspect, BuildCOG, ClipRaster, D8FlowDirection, FillDepressions, FlowAccumulation, GeocodeSLC, Hillshade, RasterizeVector, Reproject, SampleRaster, SLCCalibration, Slope, SpatialJoin, WaterElevationMosaic, ZonalStats
 - 1 flow: HydrologyFlow (fill→D8→accumulation)
 - 1 executor: LocalExecutor
-- ConnectorRouter for source-ref-based connector selection
+- ConnectorRouter for default CLI source-ref selection with extension/scheme/prefix filters
 - DuckDB-backed registry with lineage graph
 - Pressure-test counts change; use `just stats` for the current surface
 

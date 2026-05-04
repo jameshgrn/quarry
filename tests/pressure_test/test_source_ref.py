@@ -159,6 +159,14 @@ class TestInfer:
         ref = SourceRef.infer("./relative/file.gpkg")
         assert ref.kind == SourceRefKind.LOCAL_VECTOR
 
+    def test_infer_local_path_with_connector_suffix(self):
+        ref = SourceRef.infer("/data/layers.gpkg::watersheds")
+        assert ref.kind == SourceRefKind.LOCAL_VECTOR
+
+    def test_infer_local_array_with_dataset_suffix(self):
+        ref = SourceRef.infer("/data/product.h5::/science/latitude")
+        assert ref.kind == SourceRefKind.LOCAL_RASTER
+
     def test_infer_http_url(self):
         ref = SourceRef.infer("https://example.com/raster.tif")
         assert ref.kind == SourceRefKind.REMOTE_URI

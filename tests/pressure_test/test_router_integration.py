@@ -1,71 +1,42 @@
 """
-Pressure test: ConnectorRouter integration across all connector types.
+Pressure test: ConnectorRouter integration across default CLI connector types.
 
 Validates that the router correctly routes different SourceRef kinds
-to the appropriate connectors according to priority and kind matching.
+to the appropriate connectors according to priority, kind matching, and
+source-shape filters.
 
 This test ensures the "false states must be impossible" principle:
-every SourceRef must route to exactly one connector, and that connector
-must be the correct one for the source type.
+every default CLI SourceRef must select one best connector, and that connector
+must be correct for the source type.
 """
-
-import os
 
 import pytest
 from quarry_connectors.cog import COGConnector
+from quarry_connectors.csv_xy import CSVXYConnector
 from quarry_connectors.duckdb_connector import DuckDBConnector
+from quarry_connectors.excel_xy import ExcelXYConnector
+from quarry_connectors.flatgeobuf import FlatGeobufConnector
+from quarry_connectors.geopackage import GeoPackageConnector
+from quarry_connectors.hdf5 import HDF5Connector
 from quarry_connectors.local_file import LocalFileConnector
+from quarry_connectors.netcdf import NetCDFConnector
+from quarry_connectors.object_store import ObjectStoreConnector
+from quarry_connectors.ogc_services import OGCServicesConnector
+from quarry_connectors.opentopography import OpenTopographyConnector
+from quarry_connectors.overture import OvertureConnector
 from quarry_connectors.postgis import PostGISConnector
+from quarry_connectors.router import build_default_router
+from quarry_connectors.shapefile import ShapefileConnector
 from quarry_connectors.stac import STACConnector
+from quarry_connectors.topojson import TopoJSONConnector
+from quarry_connectors.zarr_connector import ZarrConnector
 from quarry_core.router import ConnectorRouter, NoConnectorError
 from quarry_core.source_ref import SourceRef, SourceRefKind
 
 
 def _get_test_router():
-    """Build router with full connector configuration matching CLI."""
-    router = ConnectorRouter()
-
-    # COGConnector: priority 0 for rasters and remote URIs
-    router.register(
-        COGConnector(),
-        priority=0,
-        kinds=[SourceRefKind.LOCAL_RASTER, SourceRefKind.REMOTE_URI],
-    )
-
-    # STACConnector: priority 0 for catalog items
-    stac_api = os.environ.get("STAC_API_URL", "https://test-stac.example.com/v1")
-    router.register(
-        STACConnector(api_url=stac_api),
-        priority=0,
-        kinds=[SourceRefKind.CATALOG_ITEM],
-    )
-
-    # PostGISConnector: priority 0 for database refs
-    router.register(
-        PostGISConnector(),
-        priority=0,
-        kinds=[SourceRefKind.DATABASE_REF],
-    )
-
-    # DuckDBConnector: priority 0 for DuckDB database files
-    router.register(
-        DuckDBConnector(),
-        priority=0,
-        kinds=[SourceRefKind.DUCKDB],
-    )
-
-    # LocalFileConnector: priority 10 (fallback) for local files
-    router.register(
-        LocalFileConnector(),
-        priority=10,
-        kinds=[
-            SourceRefKind.LOCAL_PATH,
-            SourceRefKind.LOCAL_RASTER,
-            SourceRefKind.LOCAL_VECTOR,
-        ],
-    )
-
-    return router
+    """Build the shared default CLI connector router."""
+    return build_default_router(stac_api_url="https://test-stac.example.com/v1")
 
 
 class TestRouterLocalPathRouting:
@@ -109,6 +80,48 @@ class TestRouterRasterRouting:
         assert isinstance(match.connector, COGConnector)
 
 
+class TestRouterExtensionRouting:
+    """Validate specialized connector routing by source extension."""
+
+    @pytest.mark.parametrize(
+        ("source", "expected_type"),
+        [
+            ("/data/watersheds.shp", ShapefileConnector),
+            ("/data/layers.gpkg::watersheds", GeoPackageConnector),
+            ("/data/points.csv", CSVXYConnector),
+            ("/data/workbook.xlsx::Sheet1", ExcelXYConnector),
+            ("/data/product.h5::/science/elevation", HDF5Connector),
+            ("/data/grid.nc::elevation", NetCDFConnector),
+            ("/data/tiles.zarr/", ZarrConnector),
+            ("/data/basins.topojson::huc12", TopoJSONConnector),
+        ],
+    )
+    def test_local_extensions_route_to_specialized_connectors(self, source, expected_type):
+        router = _get_test_router()
+
+        match = router.select_one(source)
+
+        assert isinstance(match.connector, expected_type), (
+            f"Expected {expected_type.__name__} for {source}, got {type(match.connector).__name__}"
+        )
+
+    @pytest.mark.parametrize(
+        ("source", "expected_type"),
+        [
+            ("/data/watersheds.geojson", LocalFileConnector),
+            ("/data/basins.json", LocalFileConnector),
+        ],
+    )
+    def test_ambiguous_extensions_do_not_route_to_specialized_connectors(
+        self, source, expected_type
+    ):
+        router = _get_test_router()
+
+        match = router.select_one(source)
+
+        assert isinstance(match.connector, expected_type)
+
+
 class TestRouterRemoteURIRouting:
     """Validate REMOTE_URI routing to COGConnector."""
 
@@ -143,6 +156,44 @@ class TestRouterRemoteURIRouting:
 
         assert match is not None
         assert isinstance(match.connector, COGConnector)
+
+    def test_non_cog_s3_uri_routes_to_object_store_connector(self):
+        """Remote non-COG geospatial files should route to ObjectStoreConnector."""
+        router = _get_test_router()
+        source = SourceRef.uri("s3://bucket/prefix/vector.gpkg")
+
+        match = router.select_one(source)
+
+        assert isinstance(match.connector, ObjectStoreConnector)
+
+    def test_https_flatgeobuf_routes_to_flatgeobuf_connector(self):
+        """HTTP(S) FlatGeobuf has a specialized connector ahead of ObjectStore."""
+        router = _get_test_router()
+        source = SourceRef.uri("https://example.com/data/roads.fgb")
+
+        match = router.select_one(source)
+
+        assert isinstance(match.connector, FlatGeobufConnector)
+
+
+class TestRouterPrefixRouting:
+    """Validate service/provider prefixes before broad catalog routing."""
+
+    @pytest.mark.parametrize(
+        ("source", "expected_type"),
+        [
+            ("wms::https://example.com/geoserver/wms::workspace:layer", OGCServicesConnector),
+            ("wfs::https://example.com/geoserver/wfs::workspace:layer", OGCServicesConnector),
+            ("overture://buildings/building", OvertureConnector),
+            ("opentopo://SRTMGL1?bbox=-120,35,-119,36", OpenTopographyConnector),
+        ],
+    )
+    def test_provider_prefixes_route_to_specialized_connectors(self, source, expected_type):
+        router = _get_test_router()
+
+        match = router.select_one(source)
+
+        assert isinstance(match.connector, expected_type)
 
 
 class TestRouterSTACRouting:
