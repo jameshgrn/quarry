@@ -3,7 +3,7 @@
 Lane: operator
 Accepts: two vector artifacts (left, right)
 Produces: one vector artifact (GeoJSON) with left geometry + joined attributes
-Predicate: intersects (v1)
+Predicates: intersects, contains, within, touches
 Join type: left join — all left features preserved; unmatched get null right attrs
 Schema collision: right columns colliding with left get '_right' suffix
 Checks: crs_valid, left_features_preserved, schema_no_collision
@@ -33,12 +33,15 @@ from quarry_core.operator import (
     ResourceScale,
 )
 
+_SUPPORTED_PREDICATES: frozenset[str] = frozenset({"intersects", "contains", "within", "touches"})
+
 
 @dataclass(frozen=True)
 class SpatialJoinParams(OperatorParams):
     """Parameters for spatial join."""
 
     output_path: str | None = None
+    # One of: intersects, contains, within, touches
     predicate: str = "intersects"
 
 
@@ -98,8 +101,11 @@ class SpatialJoinOperator:
         if params.output_path is None:
             errors.append("output_path is required")
 
-        if params.predicate != "intersects":
-            errors.append(f"Unsupported predicate: {params.predicate} (v1 supports: intersects)")
+        if params.predicate not in _SUPPORTED_PREDICATES:
+            errors.append(
+                f"Unsupported predicate: {params.predicate!r} "
+                f"(supported: {', '.join(sorted(_SUPPORTED_PREDICATES))})"
+            )
 
         return errors
 
@@ -182,7 +188,7 @@ class SpatialJoinOperator:
                             for right_geom, right_props in right_features:
                                 if right_geom is None or right_geom.is_empty:
                                     continue
-                                if prepared.intersects(right_geom):
+                                if getattr(prepared, params.predicate)(right_geom):
                                     matches.append(right_props)
 
                         if not matches:

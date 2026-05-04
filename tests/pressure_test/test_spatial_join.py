@@ -14,9 +14,13 @@ Stress points:
 9. Point-in-polygon join
 10. Lineage records operation and params
 11. Output artifact metadata (fresh from file, not copied)
-12. Validation rejects unsupported predicate
+12. Validation rejects invalid predicate (intersects/contains/within/touches accepted)
 13. Many-to-many — both sides overlap multiple features
 14. Mixed geometry types in single layer
+15. predicate=contains — left polygon containing right point matches
+16. predicate=within — left polygon contained in right polygon matches
+17. predicate=touches — boundary-only contact matches; interior overlap does not
+18. predicate asymmetry — same geometry pair with contains vs within yields different match counts
 """
 
 from __future__ import annotations
@@ -454,8 +458,8 @@ def test_output_artifact_metadata(op, workspace):
 # ---------------------------------------------------------------------------
 
 
-def test_unsupported_predicate_rejected(op, workspace):
-    """Predicate other than 'intersects' rejected at validation."""
+def test_invalid_predicate_rejected(op, workspace):
+    """Invalid predicate rejected at validation (crosses not supported)."""
     left_art = Artifact(
         type=ArtifactType.VECTOR,
         backing=BackingStore(kind=BackingStoreKind.LOCAL_FILE, uri="/fake"),
@@ -466,7 +470,7 @@ def test_unsupported_predicate_rejected(op, workspace):
         backing=BackingStore(kind=BackingStoreKind.LOCAL_FILE, uri="/fake"),
         spatial=SpatialDescriptor(crs="EPSG:32610"),
     )
-    params = SpatialJoinParams(output_path="/fake/out.geojson", predicate="contains")
+    params = SpatialJoinParams(output_path="/fake/out.geojson", predicate="crosses")
     errors = op.validate_inputs([left_art, right_art], params)
     assert any("Unsupported predicate" in e for e in errors)
 
@@ -642,3 +646,144 @@ def test_multiple_colliding_columns(op, workspace):
     # Lineage records collision renames
     renames = result.artifact.lineage.params["collision_renames"]
     assert renames == {"name": "name_right", "code": "code_right"}
+
+
+# ---------------------------------------------------------------------------
+# 15. predicate=contains — left polygon containing right point matches
+# ---------------------------------------------------------------------------
+
+
+def test_predicate_contains(op, workspace):
+    """Left polygon containing right point matches with predicate=contains."""
+    left_poly = Polygon([(0, 0), (100, 0), (100, 100), (0, 100)])
+    right_point = Point(50, 50)
+
+    left_path = workspace / "left.geojson"
+    right_path = workspace / "right.geojson"
+    _write_vector(left_path, [left_poly], properties=[{"lid": "big"}])
+    _write_vector(right_path, [right_point], properties=[{"rid": "inside"}])
+
+    left_art = _make_vector_artifact(left_path)
+    right_art = _make_vector_artifact(right_path)
+
+    params = SpatialJoinParams(output_path=str(workspace / "out.geojson"), predicate="contains")
+    op.execute([left_art, right_art], params)
+
+    features = _read_output(workspace / "out.geojson")
+    assert len(features) == 1
+    assert features[0]["properties"]["lid"] == "big"
+    assert features[0]["properties"]["rid"] == "inside"
+
+
+# ---------------------------------------------------------------------------
+# 16. predicate=within — left polygon contained in right polygon matches
+# ---------------------------------------------------------------------------
+
+
+def test_predicate_within(op, workspace):
+    """Left polygon within right polygon matches with predicate=within."""
+    left_poly = Polygon([(45, 45), (55, 45), (55, 55), (45, 55)])  # 10m square at (45,45)
+    right_poly = Polygon([(0, 0), (100, 0), (100, 100), (0, 100)])  # 100m square at origin
+
+    left_path = workspace / "left.geojson"
+    right_path = workspace / "right.geojson"
+    _write_vector(left_path, [left_poly], properties=[{"lid": "small"}])
+    _write_vector(right_path, [right_poly], properties=[{"rid": "large"}])
+
+    left_art = _make_vector_artifact(left_path)
+    right_art = _make_vector_artifact(right_path)
+
+    params = SpatialJoinParams(output_path=str(workspace / "out.geojson"), predicate="within")
+    op.execute([left_art, right_art], params)
+
+    features = _read_output(workspace / "out.geojson")
+    assert len(features) == 1
+    assert features[0]["properties"]["lid"] == "small"
+    assert features[0]["properties"]["rid"] == "large"
+
+
+# ---------------------------------------------------------------------------
+# 17. predicate=touches — boundary-only contact matches; interior overlap does not
+# ---------------------------------------------------------------------------
+
+
+def test_predicate_touches(op, workspace):
+    """Touching polygons match with predicate=touches; interior overlap does not."""
+    # Two polygons sharing the x=10 edge (touching)
+    left_poly = Polygon([(0, 0), (10, 0), (10, 10), (0, 10)])
+    right_poly = Polygon([(10, 0), (20, 0), (20, 10), (10, 10)])
+
+    left_path = workspace / "left.geojson"
+    right_path = workspace / "right.geojson"
+    _write_vector(left_path, [left_poly], properties=[{"lid": "left"}])
+    _write_vector(right_path, [right_poly], properties=[{"rid": "right"}])
+
+    left_art = _make_vector_artifact(left_path)
+    right_art = _make_vector_artifact(right_path)
+
+    # With touches: should match (they share an edge)
+    params_touches = SpatialJoinParams(
+        output_path=str(workspace / "out_touches.geojson"), predicate="touches"
+    )
+    op.execute([left_art, right_art], params_touches)
+    features_touches = _read_output(workspace / "out_touches.geojson")
+    assert len(features_touches) == 1
+    assert features_touches[0]["properties"]["rid"] == "right"
+
+    # With intersects: should also match (touching satisfies intersects)
+    params_intersects = SpatialJoinParams(
+        output_path=str(workspace / "out_intersects.geojson"), predicate="intersects"
+    )
+    op.execute([left_art, right_art], params_intersects)
+    features_intersects = _read_output(workspace / "out_intersects.geojson")
+    assert len(features_intersects) == 1
+    assert features_intersects[0]["properties"]["rid"] == "right"
+
+    # With contains: should NOT match (left does not contain right, they just touch)
+    params_contains = SpatialJoinParams(
+        output_path=str(workspace / "out_contains.geojson"), predicate="contains"
+    )
+    op.execute([left_art, right_art], params_contains)
+    features_contains = _read_output(workspace / "out_contains.geojson")
+    assert len(features_contains) == 1
+    # Left feature preserved but with null right attrs (left join invariant)
+    assert features_contains[0]["properties"]["rid"] is None
+
+
+# ---------------------------------------------------------------------------
+# 18. predicate asymmetry — same geometry pair with contains vs within yields different match
+# counts
+# ---------------------------------------------------------------------------
+
+
+def test_predicate_asymmetry_contains_within(op, workspace):
+    """Contains vs within on same pair yield different results due to asymmetry."""
+    # Small polygon at (45,45) inside large polygon at origin
+    small_poly = Polygon([(45, 45), (55, 45), (55, 55), (45, 55)])
+    large_poly = Polygon([(0, 0), (100, 0), (100, 100), (0, 100)])
+
+    left_path = workspace / "left.geojson"
+    right_path = workspace / "right.geojson"
+    _write_vector(left_path, [small_poly], properties=[{"lid": "small"}])
+    _write_vector(right_path, [large_poly], properties=[{"rid": "large"}])
+
+    left_art = _make_vector_artifact(left_path)
+    right_art = _make_vector_artifact(right_path)
+
+    # With contains: small does NOT contain large → no match, right attrs null
+    params_contains = SpatialJoinParams(
+        output_path=str(workspace / "out_contains.geojson"), predicate="contains"
+    )
+    op.execute([left_art, right_art], params_contains)
+    features_contains = _read_output(workspace / "out_contains.geojson")
+    assert len(features_contains) == 1
+    assert features_contains[0]["properties"]["rid"] is None  # No match
+
+    # With within: small IS within large → match, right attrs populated
+    params_within = SpatialJoinParams(
+        output_path=str(workspace / "out_within.geojson"), predicate="within"
+    )
+    op.execute([left_art, right_art], params_within)
+    features_within = _read_output(workspace / "out_within.geojson")
+    assert len(features_within) == 1
+    assert features_within[0]["properties"]["rid"] == "large"  # Match!
