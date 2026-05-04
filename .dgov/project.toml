@@ -1,0 +1,66 @@
+[project]
+language = "python"
+# uv workspace monorepo: production code lives under packages/.
+src_dir = "packages"
+# Canonical test paths from pytest.ini (mirrors `just test-all-quiet`).
+test_dir = "tests/pressure_test packages/quarry-connectors/tests"
+source_extensions = [".py"]
+
+# OpenAI-compatible worker endpoint
+default_agent = "accounts/fireworks/routers/kimi-k2p5-turbo"
+llm_base_url = "https://api.fireworks.ai/inference/v1"
+llm_api_key_env = "FIREWORKS_API_KEY"
+
+# Sentrux baseline is explicit governor-owned state.
+# Run "dgov sentrux gate-save" after bootstrap and whenever you intentionally
+# refresh the architectural baseline for this repo.
+
+# Canonical pressure gate. PYTHONPATH wiring matches the justfile so dgov
+# worktrees see the workspace packages without an editable install.
+test_cmd = "PYTHONPATH=packages/quarry-core/src:packages/quarry-connectors/src:packages/quarry-operators/src:packages/quarry-registry/src:packages/quarry-cli/src uv run pytest tests/pressure_test packages/quarry-connectors/tests -q --tb=short"
+lint_cmd = "uv run ruff check {file}"
+format_cmd = "uv run ruff format {file}"
+lint_fix_cmd = "uv run ruff check --fix --unsafe-fixes --show-fixes {file}"
+format_check_cmd = "uv run ruff format --check {file}"
+type_check_cmd = "uv run ty check {file}"
+coverage_cmd = "PYTHONPATH=packages/quarry-core/src:packages/quarry-connectors/src:packages/quarry-operators/src:packages/quarry-registry/src:packages/quarry-cli/src uv run pytest --cov=packages --cov-report=json:{output} -q"
+# Real threshold from the current pressure surface. Bump after measurement,
+# do not lower without an explicit decision in the ledger.
+coverage_threshold = 60.0
+# setup_cmd = ""  # Runs in worktree before gates
+
+# Worktree bootstrap timeout in seconds
+bootstrap_timeout = 300
+
+# Settlement timeout in seconds
+settlement_timeout = 120
+
+# Target line length for formatting and wrapping
+line_length = 99
+
+# Fast review hooks (git sanity checks). {file} is replaced with changed files.
+review_hooks = [
+  # "grep -q 'TODO' {file} && exit 1 || exit 0",  # Example: reject TODOs
+  # "detect-secrets-hook --baseline .secrets.baseline {file}",  # Example: secrets
+]
+
+[tool_policy]
+restrict_run_bash = true
+deny_shell_commands = ["pip", "python -m pip", "pip3", "python -m venv", "uv venv"]
+deny_shell_file_mutations = true
+require_wrapped_verify_tools = true
+require_uv_run = true
+
+[scope]
+# Files exempted from scope-violation checks in addition to dgov's built-in
+# Python defaults: .venv, uv.lock, __pycache__, and *.pyc.
+# Add repo-specific managed files here when workers may touch them incidentally.
+# Exact paths, directory names, and constrained globs like *.pyc are supported.
+ignore_files = ["uv.lock"]
+
+[conventions]
+# Quarry doctrine — every change must declare a lane (connector, artifact,
+# operator, flow, executor, check, adapter, registry). quarry-core stays
+# zero-dependency. No hidden pathways around connectors/operators. Update
+# CONTRACTS.md and PRESSURE_TESTS.md when ontology changes.
+style = "Prefer the smallest change that satisfies the pressure test"
