@@ -1,0 +1,50 @@
+[tasks.unify-canonical-guidance]
+summary = "Rewrite AGENTS.md as the unified canonical guidance, merging project context from CLAUDE.md with the existing agent rules, and dropping changelog-style milestone sections."
+prompt = """
+Orient:
+- Read `AGENTS.md` and `CLAUDE.md` end-to-end. They are partially overlapping siblings: CLAUDE.md has project framing (intro, monorepo structure, commands, toolchain, milestones), AGENTS.md has agent-specific rules and a unique `Raiding source: hydrops/` section. The 10 "Behavior Rules" / "Rules" sections overlap heavily.
+- Background: dgov's policy-mirror gate treats AGENTS.md as canonical and requires CLAUDE.md and GEMINI.md to read byte-identical via the standard library `Path.read_text()` call (which follows symlinks). The next task in this plan will replace CLAUDE.md and GEMINI.md with symlinks to AGENTS.md, so AGENTS.md must work as the single source of truth for human and agent readers alike.
+- Lane: governance (canon update). Single logical commit.
+- HARD BOUNDARY: only `AGENTS.md` may be MODIFIED. `CLAUDE.md` is claimed for read-only context — it MUST remain byte-identical to its HEAD state. dgov diffs your final commit; any line change in CLAUDE.md is a contract violation. Do NOT touch any other file via your tools.
+
+Edit:
+1. Replace the entire contents of `AGENTS.md` with a single document organized in this exact section order:
+   a. `# Quarry` (H1) followed by one paragraph: "Canonical geospatial execution substrate." plus one sentence introducing this file as the canonical agent + project guidance.
+   b. `## Doctrine` — copy the 7-rule doctrine list verbatim from CLAUDE.md (numbered list, lines about canonical pathways, artifacts over files, connectors, operations, execution, storage, agents).
+   c. `## Lane Declaration Rule` — copy the 8-lane bullet list verbatim from CLAUDE.md, plus the closing line "If an idea cannot name its lane, it is not ready."
+   d. `## Monorepo Structure` — copy the fenced code block from CLAUDE.md unchanged.
+   e. `## Canonical Commands` — copy the fenced code block from CLAUDE.md unchanged.
+   f. `## Toolchain` — copy the bullet list from CLAUDE.md unchanged.
+   g. `## Behavior Rules` — merge the two existing rule sets into one numbered list, preserving the AGENTS.md "Rules" tone (prime-directive style: lane declaration, no-contract-changes-without-proof, smallest-change, no-hidden-pathways, fresh-output-metadata, run-targeted-tests, no-bypass-registry, no-anticipatory-generalization, no-quarry-core-deps, update-docs-on-ontology-change). Eliminate duplicates with CLAUDE.md's bulleted Behavior Rules. Keep the "Prime directive: Preserve the ontology. Do not invent parallel abstractions." as a one-line subhead before the numbered rules.
+   h. `## What NOT to build` — merge the two lists into one bullet list (deduplicate; current overlap is high). Keep the "until ..." qualifiers from CLAUDE.md where present.
+   i. `## Scheduled Debt` — copy CLAUDE.md's Scheduled Debt list verbatim (it is the comprehensive superset). The string `Semantic product connectors (FOFStack, PIXC, SLC, Sentinel2) are not auto-routed by generic extensions/catalog strings — require explicit connector use until a semantic SourceRef pressure test forces routing` MUST appear in this section verbatim (the existing pressure test asserts it).
+   j. `## Substrate Phase — COMPLETE` — copy CLAUDE.md's section verbatim (the one-paragraph status with connector and operator counts).
+   k. `## Raiding source: hydrops/` — copy from AGENTS.md verbatim (this section is unique to AGENTS.md; all of it preserves).
+   l. `## Commit Conventions` — copy CLAUDE.md's section verbatim.
+   m. `## Branch Strategy` — copy CLAUDE.md's section verbatim.
+   n. `## Related Docs` — copy CLAUDE.md's section but DROP the line that lists `AGENTS.md — agent behavior rules and debt list` (it would be self-referential after consolidation). Keep the references to CONTRACTS.md, REPO_MAP.md, PRESSURE_TESTS.md, HYDROLOGY_PACK.md, and examples/watershed_analysis.py.
+   o. The string `extension/scheme/prefix` MUST appear at least once anywhere in AGENTS.md (existing pressure test asserts it; it currently lives in CLAUDE.md's debt-adjacent text and AGENTS.md's status section).
+2. Drop entirely (do NOT include in the rewrite):
+   - The `## v0.2.0 Milestone — Consolidation & Legibility — COMPLETE` section.
+   - The `## v0.3.0 Milestone — CLI Adapter` section.
+   These are CHANGELOG concerns, not behavior rules.
+3. Style constraints:
+   - Plain markdown. No HTML. No emojis. No code fences for non-code content.
+   - Final file should be 200–260 lines. Each section header followed by a blank line.
+   - Heading hierarchy: one H1 (`# Quarry`), the rest H2 or deeper.
+
+Verify:
+- `wc -l AGENTS.md` reports between 200 and 260.
+- `head -1 AGENTS.md` prints `# Quarry`.
+- `grep -c "extension/scheme/prefix" AGENTS.md` is at least 1.
+- `grep -c "Semantic product connectors" AGENTS.md` is at least 1.
+- `grep -c "Raiding source: hydrops/" AGENTS.md` is exactly 1.
+- `grep -c "v0.2.0 Milestone\\|v0.3.0 Milestone" AGENTS.md` is 0.
+- `git diff --stat CLAUDE.md` shows zero changes.
+- The settlement gate runs the full pressure suite — trust it.
+"""
+commit_message = "Unify AGENTS.md as canonical guidance for all mirrors"
+self_review = true
+
+files.edit = ["AGENTS.md", "CLAUDE.md"]
+files.read = ["examples/watershed_analysis.py"]
