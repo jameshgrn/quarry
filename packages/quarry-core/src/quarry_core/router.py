@@ -47,6 +47,19 @@ class ConnectorMatch:
         return self.rank < other.rank
 
 
+@dataclass(frozen=True)
+class RegistrationView:
+    """Public read-only view of a router registration."""
+
+    connector_name: str
+    kinds: frozenset[SourceRefKind]
+    priority: int
+    fallback: bool
+    extensions: frozenset[str]
+    schemes: frozenset[str]
+    prefixes: frozenset[str]
+
+
 class NoConnectorError(Exception):
     """No registered connector can handle this source."""
 
@@ -228,6 +241,17 @@ class ConnectorRouter:
         return matches[0]
 
     @property
-    def registrations(self) -> list[tuple[str, frozenset[SourceRefKind], int, bool]]:
-        """Inspect registered connectors (for debugging/testing)."""
-        return [(r.connector.name, r.kinds, r.priority, r.fallback) for r in self._registrations]
+    def registrations(self) -> list[RegistrationView]:
+        """Return typed views of registered connectors for introspection."""
+        return [
+            RegistrationView(
+                connector_name=r.connector.name,
+                kinds=r.kinds,
+                priority=r.priority,
+                fallback=r.fallback,
+                extensions=r.extensions,
+                schemes=r.schemes,
+                prefixes=r.prefixes,
+            )
+            for r in self._registrations
+        ]

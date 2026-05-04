@@ -22,7 +22,13 @@ from pathlib import Path
 
 import pytest
 from quarry_core.connector import Connector, ConnectorCapability, MaterializeResult
-from quarry_core.router import ConnectorMatch, ConnectorRouter, MatchReason, NoConnectorError
+from quarry_core.router import (
+    ConnectorMatch,
+    ConnectorRouter,
+    MatchReason,
+    NoConnectorError,
+    RegistrationView,
+)
 from quarry_core.source_ref import SourceRef, SourceRefKind
 
 # ---------------------------------------------------------------------------
@@ -374,7 +380,7 @@ class TestRegistrationIntrospection:
         router, _, _, _, _ = _make_router()
         regs = router.registrations
         assert len(regs) == 4
-        names = [r[0] for r in regs]
+        names = [r.connector_name for r in regs]
         assert "cog" in names
         assert "local_file" in names
         assert "stac" in names
@@ -383,6 +389,28 @@ class TestRegistrationIntrospection:
     def test_empty_router(self):
         router = ConnectorRouter()
         assert router.registrations == []
+
+    def test_registrations_view_exposes_policy_surface(self):
+        """RegistrationView exposes full policy surface: priority, extensions, schemes, prefixes."""
+        router = ConnectorRouter()
+        stub = StubConnector("policy_test")
+        router.register(
+            stub,
+            kinds={SourceRefKind.LOCAL_RASTER},
+            priority=3,
+            extensions={".tif", ".tiff"},
+            schemes={"s3", "https"},
+            prefixes={"opentopo://"},
+        )
+        regs = router.registrations
+        assert len(regs) == 1
+        view = regs[0]
+        assert isinstance(view, RegistrationView)
+        assert view.priority == 3
+        assert view.extensions == frozenset({".tif", ".tiff"})
+        assert view.schemes == frozenset({"s3", "https"})
+        assert view.prefixes == frozenset({"opentopo://"})
+        assert view.fallback is False
 
 
 # ---------------------------------------------------------------------------
