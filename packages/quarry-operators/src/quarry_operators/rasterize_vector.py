@@ -56,6 +56,9 @@ class RasterizeVectorParams(OperatorParams):
     burn_attribute: str | None = None  # feature property name for per-feature burn
     nodata: float = 0.0  # background / nodata value
     dtype: str = "float32"
+    all_touched: bool = False  # rasterio rasterize all_touched semantics; True for thin features
+    burn_attributes: tuple[str, ...] | None = None  # multi-band: one band per attribute name;
+    # mutually exclusive with burn_attribute
 
 
 class RasterizeVectorOperator:
@@ -63,10 +66,12 @@ class RasterizeVectorOperator:
 
     Input 0: vector artifact (polygon geometries)
 
-    Output: raster artifact (single-band GeoTIFF). Each pixel covered by a
-    polygon receives either a constant ``burn_value`` or the value of
-    ``burn_attribute`` from that feature. Pixels not covered by any
-    polygon receive ``nodata``.
+    Output: raster artifact (single-band or multi-band GeoTIFF). Each pixel
+    covered by a polygon receives either a constant ``burn_value`` or the value
+    of ``burn_attribute`` from that feature. Pixels not covered by any polygon
+    receive ``nodata``. ``burn_attributes`` produces a multi-band GeoTIFF (one
+    band per listed attribute). ``all_touched=True`` includes every pixel touched
+    by a geometry edge.
 
     When ``extent`` is None the bounding box of the input vector is used.
     Resolution must be explicitly provided — no guessing.
@@ -122,6 +127,18 @@ class RasterizeVectorOperator:
             if xmin >= xmax or ymin >= ymax:
                 errors.append(f"Invalid extent: xmin >= xmax or ymin >= ymax ({params.extent})")
 
+        if params.burn_attribute is not None and params.burn_attributes is not None:
+            errors.append("burn_attribute and burn_attributes are mutually exclusive — use one")
+
+        if params.burn_attributes is not None and len(params.burn_attributes) == 0:
+            errors.append("burn_attributes must be non-empty when set")
+
+        if params.burn_attributes is not None:
+            for attr in params.burn_attributes:
+                if not isinstance(attr, str):
+                    errors.append("burn_attributes entries must be strings")
+                    break
+
         return errors
 
     def execute(self, inputs: list[Artifact], params: OperatorParams) -> OperatorResult:
@@ -161,43 +178,98 @@ class RasterizeVectorOperator:
 
                 transform = from_bounds(xmin, ymin, xmax, ymax, width, height)
 
-                # Build (geometry, value) pairs
-                shapes: list[tuple[dict, float]] = []
-                for feature in src:
-                    geom = shape(feature["geometry"])
-                    if geom is None or geom.is_empty:
-                        continue
+                # Determine band count and prepare shapes
+                band_count = (
+                    len(params.burn_attributes) if params.burn_attributes is not None else 1
+                )
 
-                    from shapely.geometry import mapping
+                if params.burn_attributes is not None:
+                    # Multi-band: one shapes list per band
+                    shapes_per_band: list[list[tuple[dict, float]]] = [
+                        [] for _ in range(band_count)
+                    ]
+                    for feature in src:
+                        geom = shape(feature["geometry"])
+                        if geom is None or geom.is_empty:
+                            continue
 
-                    geojson = mapping(geom)
+                        from shapely.geometry import mapping
 
-                    if params.burn_attribute is not None:
+                        geojson = mapping(geom)
                         props = feature.get("properties", {})
-                        raw = props.get(params.burn_attribute)
-                        if raw is None:
-                            continue  # skip features missing the attribute
-                        try:
-                            val = float(raw)
-                        except (TypeError, ValueError):
-                            continue  # skip non-numeric
-                    else:
-                        val = float(params.burn_value)
 
-                    shapes.append((geojson, val))
+                        for band_idx, attr in enumerate(params.burn_attributes):
+                            raw = props.get(attr)
+                            if raw is None:
+                                continue  # skip this band for this feature
+                            try:
+                                val = float(raw)
+                            except (TypeError, ValueError):
+                                continue  # skip non-numeric
+                            shapes_per_band[band_idx].append((geojson, val))
+                else:
+                    # Single-band: build one shapes list
+                    shapes: list[tuple[dict, float]] = []
+                    for feature in src:
+                        geom = shape(feature["geometry"])
+                        if geom is None or geom.is_empty:
+                            continue
+
+                        from shapely.geometry import mapping
+
+                        geojson = mapping(geom)
+
+                        if params.burn_attribute is not None:
+                            props = feature.get("properties", {})
+                            raw = props.get(params.burn_attribute)
+                            if raw is None:
+                                continue  # skip features missing the attribute
+                            try:
+                                val = float(raw)
+                            except (TypeError, ValueError):
+                                continue  # skip non-numeric
+                        else:
+                            val = float(params.burn_value)
+
+                        shapes.append((geojson, val))
 
             # Rasterize
             dtype = np.dtype(params.dtype)
-            if shapes:
-                burned = rasterize(
-                    shapes,
-                    out_shape=(height, width),
-                    transform=transform,
-                    fill=params.nodata,
-                    dtype=dtype,
-                )
+            if band_count == 1:
+                # Single-band path
+                if shapes:
+                    burned = rasterize(
+                        shapes,
+                        out_shape=(height, width),
+                        transform=transform,
+                        fill=params.nodata,
+                        dtype=dtype,
+                        all_touched=params.all_touched,
+                    )
+                else:
+                    burned = np.full((height, width), params.nodata, dtype=dtype)
+                shapes_burned = len(shapes)
             else:
-                burned = np.full((height, width), params.nodata, dtype=dtype)
+                # Multi-band path: rasterize each band independently
+                band_arrays = []
+                total_shapes = 0
+                for band_shapes in shapes_per_band:
+                    if band_shapes:
+                        band_arr = rasterize(
+                            band_shapes,
+                            out_shape=(height, width),
+                            transform=transform,
+                            fill=params.nodata,
+                            dtype=dtype,
+                            all_touched=params.all_touched,
+                        )
+                    else:
+                        band_arr = np.full((height, width), params.nodata, dtype=dtype)
+                    band_arrays.append(band_arr)
+                    total_shapes += len(band_shapes)
+                # Stack into (N, H, W) array
+                burned = np.stack(band_arrays, axis=0)
+                shapes_burned = total_shapes
 
             # Write GeoTIFF
             profile = {
@@ -205,13 +277,17 @@ class RasterizeVectorOperator:
                 "dtype": dtype.name,
                 "width": width,
                 "height": height,
-                "count": 1,
+                "count": band_count,
                 "crs": vector_crs,
                 "transform": transform,
                 "nodata": params.nodata,
             }
             with rasterio.open(output_path, "w", **profile) as dst:
-                dst.write(burned, 1)
+                if band_count == 1:
+                    dst.write(burned, 1)
+                else:
+                    for i in range(band_count):
+                        dst.write(burned[i], i + 1)
 
         except OperatorError:
             raise
@@ -251,7 +327,7 @@ class RasterizeVectorOperator:
                     out_bounds.top,
                 ),
                 resolution=out_res,
-                band_count=1,
+                band_count=band_count,
             ),
             lineage=Lineage(
                 operation=self.name,
@@ -263,6 +339,10 @@ class RasterizeVectorOperator:
                     "burn_attribute": params.burn_attribute,
                     "nodata": params.nodata,
                     "dtype": params.dtype,
+                    "all_touched": params.all_touched,
+                    "burn_attributes": list(params.burn_attributes)
+                    if params.burn_attributes is not None
+                    else None,
                 },
             ),
             metadata={
@@ -270,7 +350,7 @@ class RasterizeVectorOperator:
                 "width": out_width,
                 "height": out_height,
                 "nodata": out_nodata,
-                "shapes_burned": len(shapes),
+                "shapes_burned": shapes_burned,
             },
         )
 

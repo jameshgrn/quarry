@@ -24,6 +24,11 @@ Stress points:
 19. Tiny resolution → large grid (dimensions_sane still valid)
 20. Wrong input type rejected
 21. Unmaterialized input rejected
+22. all_touched default False; True includes more pixels
+23. Multi-band output — one band per attribute in burn_attributes
+24. Multi-band per-band values correct
+25. burn_attribute and burn_attributes mutually exclusive
+26. Empty burn_attributes rejected
 """
 
 from __future__ import annotations
@@ -849,3 +854,190 @@ def test_no_extent_uses_vector_bounds(op, workspace):
         assert bounds.bottom == pytest.approx(20.0)
         assert src.width == 5
         assert src.height == 5
+
+
+# ---------------------------------------------------------------------------
+# 24. all_touched default False; True includes more pixels
+# ---------------------------------------------------------------------------
+
+
+def test_all_touched_default_false(op, workspace):
+    """Default all_touched=False gives fewer pixels than all_touched=True."""
+    # Thin diagonal line polygon - with all_touched=False, only pixels whose
+    # centers are inside are burned. With all_touched=True, all touched pixels burn.
+    # A thin diagonal strip from (0, 0.6) to (0.4, 1.0) only touches corner of pixel (0, 2)
+    poly = Polygon([(0, 0.6), (0.4, 1.0), (0.2, 1.0), (0, 0.8)])
+    vec_path = workspace / "input.geojson"
+    _write_vector(vec_path, [poly])
+    vec_art = _make_vector_artifact(vec_path)
+
+    out_path_default = workspace / "out_default.tif"
+    params_default = RasterizeVectorParams(
+        output_path=str(out_path_default),
+        resolution=(1.0, 1.0),
+        extent=(0, 0, 3, 3),
+        burn_value=1.0,
+        all_touched=False,
+    )
+    result_default = op.execute([vec_art], params_default)
+    assert result_default.artifact.spatial.band_count == 1
+
+    with rasterio.open(out_path_default) as src:
+        data_default = src.read(1)
+        count_default = int(np.sum(data_default != 0))
+
+    out_path_true = workspace / "out_true.tif"
+    params_true = RasterizeVectorParams(
+        output_path=str(out_path_true),
+        resolution=(1.0, 1.0),
+        extent=(0, 0, 3, 3),
+        burn_value=1.0,
+        all_touched=True,
+    )
+    result_true = op.execute([vec_art], params_true)
+    assert result_true.artifact.spatial.band_count == 1
+
+    with rasterio.open(out_path_true) as src:
+        data_true = src.read(1)
+        count_true = int(np.sum(data_true != 0))
+
+    # all_touched=True should include more pixels (or at least not fewer)
+    assert count_true >= count_default
+    # In this specific case, True includes more pixels
+    assert count_true > count_default
+
+
+# ---------------------------------------------------------------------------
+# 25. Multi-band output — one band per attribute in burn_attributes
+# ---------------------------------------------------------------------------
+
+
+def test_multi_band_output_band_count(op, workspace):
+    """burn_attributes produces multi-band output with correct band count."""
+    poly1 = Polygon([(0, 0), (2, 0), (2, 2), (0, 2)])
+    poly2 = Polygon([(3, 3), (5, 3), (5, 5), (3, 5)])
+    vec_path = workspace / "input.geojson"
+    _write_vector(
+        vec_path,
+        [poly1, poly2],
+        properties=[
+            {"elevation": 100.0, "slope": 15.0, "aspect": 90.0},
+            {"elevation": 200.0, "slope": 25.0, "aspect": 180.0},
+        ],
+    )
+    vec_art = _make_vector_artifact(vec_path)
+
+    out_path = workspace / "out.tif"
+    params = RasterizeVectorParams(
+        output_path=str(out_path),
+        resolution=(1.0, 1.0),
+        extent=(0, 0, 6, 6),
+        burn_attributes=("elevation", "slope", "aspect"),
+    )
+
+    result = op.execute([vec_art], params)
+
+    # Assert band count is 3
+    assert result.artifact.spatial.band_count == 3
+    assert len(result.artifact.lineage.params["burn_attributes"]) == 3
+
+    with rasterio.open(out_path) as src:
+        assert src.count == 3
+
+
+# ---------------------------------------------------------------------------
+# 26. Multi-band per-band values correct
+# ---------------------------------------------------------------------------
+
+
+def test_multi_band_per_band_values(op, workspace):
+    """Each band contains correct attribute values for covered pixels."""
+    # Use polygons with clear pixel coverage - center of pixels (0.5, 0.5) and (3.5, 3.5)
+    poly1 = Polygon([(0.2, 0.2), (0.8, 0.2), (0.8, 0.8), (0.2, 0.8)])
+    poly2 = Polygon([(3.2, 3.2), (3.8, 3.2), (3.8, 3.8), (3.2, 3.8)])
+    vec_path = workspace / "input.geojson"
+    _write_vector(
+        vec_path,
+        [poly1, poly2],
+        properties=[
+            {"elevation": 100.0, "slope": 15.0, "aspect": 90.0},
+            {"elevation": 200.0, "slope": 25.0, "aspect": 180.0},
+        ],
+    )
+    vec_art = _make_vector_artifact(vec_path)
+
+    out_path = workspace / "out.tif"
+    params = RasterizeVectorParams(
+        output_path=str(out_path),
+        resolution=(1.0, 1.0),
+        extent=(0, 0, 5, 5),
+        burn_attributes=("elevation", "slope", "aspect"),
+    )
+
+    op.execute([vec_art], params)
+
+    with rasterio.open(out_path) as src:
+        # Read band 1 (elevation) - row 4 is y~0.5 (from top), col 0 is x~0.5 (from left)
+        # rasterio arrays are (row, col) with row 0 at top (y=max)
+        elev = src.read(1)
+        # Pixel at bottom-left (row 4, col 0) should have poly1 value (inverted y)
+        # Actually with extent (0,0,5,5) and res 1.0: row 0 is y=4.5, row 4 is y=0.5
+        # So poly1 at (0.5, 0.5) is at row 4, col 0
+        assert elev[4, 0] == pytest.approx(100.0)
+        # poly2 at (3.5, 3.5) is at row 1, col 3
+        assert elev[1, 3] == pytest.approx(200.0)
+
+        # Read band 2 (slope)
+        slope = src.read(2)
+        assert slope[4, 0] == pytest.approx(15.0)
+        assert slope[1, 3] == pytest.approx(25.0)
+
+        # Read band 3 (aspect)
+        aspect = src.read(3)
+        assert aspect[4, 0] == pytest.approx(90.0)
+        assert aspect[1, 3] == pytest.approx(180.0)
+
+
+# ---------------------------------------------------------------------------
+# 27. burn_attribute and burn_attributes mutually exclusive
+# ---------------------------------------------------------------------------
+
+
+def test_burn_attribute_and_burn_attributes_mutually_exclusive(op, workspace):
+    """Cannot use both burn_attribute and burn_attributes simultaneously."""
+    poly = Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])
+    vec_path = workspace / "input.geojson"
+    _write_vector(vec_path, [poly], properties=[{"elevation": 100.0}])
+    vec_art = _make_vector_artifact(vec_path)
+
+    params = RasterizeVectorParams(
+        output_path=str(workspace / "out.tif"),
+        resolution=(1.0, 1.0),
+        burn_attribute="elevation",
+        burn_attributes=("elevation",),
+    )
+
+    errors = op.validate_inputs([vec_art], params)
+    assert any("mutually exclusive" in e.lower() for e in errors)
+
+
+# ---------------------------------------------------------------------------
+# 28. Empty burn_attributes rejected
+# ---------------------------------------------------------------------------
+
+
+def test_empty_burn_attributes_rejected(op, workspace):
+    """Empty burn_attributes tuple is rejected at validation."""
+    poly = Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])
+    vec_path = workspace / "input.geojson"
+    _write_vector(vec_path, [poly], properties=[{"elevation": 100.0}])
+    vec_art = _make_vector_artifact(vec_path)
+
+    params = RasterizeVectorParams(
+        output_path=str(workspace / "out.tif"),
+        resolution=(1.0, 1.0),
+        burn_attributes=(),
+    )
+
+    errors = op.validate_inputs([vec_art], params)
+    assert any("non-empty" in e.lower() for e in errors)
