@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "quarry-registry"
 version = "0.1.0"
 description = "DuckDB-backed artifact and run registry for Quarry"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "quarry-core",
     "duckdb>=1.0.0",
