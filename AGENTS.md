@@ -96,9 +96,8 @@ Prime directive: Preserve the ontology. Do not invent parallel abstractions.
 - SpatialJoin O(left×right) brute force — STRtree spatial index deferred until perf measured
 - BuildCOG only tested with GeoTIFF input — other rasterio formats untested
 - RasterizeVector only tested with polygons — line/point rasterization deferred
-- RasterizeVector single-band only — multi-band output deferred
-- RasterizeVector no all_touched option — deferred until needed
-- CLI plain text output only — JSON mode deferred until needed
+- RasterizeVectorOperator.execute is 220 lines after multi-band path landed — extract `_rasterize_single_band` and `_rasterize_multi_band` helpers when readability or perf forces it
+- `quarry --json` route output stringifies the SourceRef.params MappingProxyType via `default=str` — emit nested object via a custom encoder when downstream tooling needs structured params
 - Operator string params (`compress`, `resampling`, `predicate`) validated against hardcoded tuples — `Literal` types deferred (large surface area)
 - `HydrologyFlow._execute_step` mutates input lists AND returns a value — mixed contract, single caller, low urgency
 - Semantic product connectors (FOFStack, PIXC, SLC, Sentinel2) are not auto-routed by generic extensions/catalog strings — require explicit connector use until a semantic SourceRef pressure test forces routing
