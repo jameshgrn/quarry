@@ -8,6 +8,7 @@ No workflow engine, no config files, no plugin system.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 from pathlib import Path
@@ -71,6 +72,7 @@ def _materialize_cli_source(
     workspace: Path,
     *,
     label: str,
+    quiet: bool = False,
 ):
     source_ref = _source_ref_from_cli(raw, label)
     try:
@@ -78,7 +80,8 @@ def _materialize_cli_source(
     except NoConnectorError as e:
         raise ValueError(str(e)) from e
 
-    print(f"Materializing {label.lower()}: {source_ref.raw}")
+    if not quiet:
+        print(f"Materializing {label.lower()}: {source_ref.raw}")
     return match.connector.materialize(source_ref.raw, workspace).artifact
 
 
@@ -111,6 +114,11 @@ def _require_run_output(run_record: RunRecord) -> OperatorResult:
     return run_record.output
 
 
+def _emit_json(data) -> None:
+    """Print one JSON object to stdout. Used when args.json_output is True."""
+    print(json.dumps(data, default=str, sort_keys=True))
+
+
 # ---------------------------------------------------------------------------
 # artifacts list
 # ---------------------------------------------------------------------------
@@ -123,6 +131,20 @@ def cmd_artifacts_list(args) -> int:
     registry = Registry(_resolve_workspace(args))
     type_filter = ArtifactType(args.type) if args.type else None
     artifacts = registry.list_artifacts(artifact_type=type_filter, limit=args.limit)
+
+    if args.json_output:
+        data = [
+            {
+                "id": a.id,
+                "name": a.name,
+                "type": a.type.value,
+                "uri": a.backing.uri if a.backing else None,
+                "created_at": a.created_at,
+            }
+            for a in artifacts
+        ]
+        _emit_json(data)
+        return 0
 
     if not artifacts:
         print("No artifacts found.")
@@ -152,8 +174,35 @@ def cmd_artifacts_show(args) -> int:
     artifact = registry.get_artifact(args.artifact_id)
 
     if artifact is None:
-        print(f"Artifact not found: {args.artifact_id}", file=sys.stderr)
+        if args.json_output:
+            _emit_json({"error": f"Artifact not found: {args.artifact_id}"})
+        else:
+            print(f"Artifact not found: {args.artifact_id}", file=sys.stderr)
         return 1
+
+    if args.json_output:
+        data = {
+            "id": artifact.id,
+            "name": artifact.name,
+            "type": artifact.type.value,
+            "uri": artifact.backing.uri if artifact.backing else None,
+            "size_bytes": artifact.backing.size_bytes if artifact.backing else None,
+            "content_hash": artifact.backing.content_hash if artifact.backing else None,
+            "spatial": {
+                "crs": artifact.spatial.crs,
+                "extent": artifact.spatial.extent,
+                "resolution": artifact.spatial.resolution,
+                "band_count": artifact.spatial.band_count,
+                "feature_count": artifact.spatial.feature_count,
+            },
+            "metadata": artifact.metadata,
+            "lineage": {
+                "parent_ids": artifact.parent_ids,
+                "run_id": artifact.run_id,
+            },
+        }
+        _emit_json(data)
+        return 0
 
     print(f"ID:       {artifact.id}")
     print(f"Type:     {artifact.type.value}")
@@ -201,10 +250,27 @@ def cmd_lineage(args) -> int:
     # Verify the artifact exists
     artifact = registry.get_artifact(args.artifact_id)
     if artifact is None:
-        print(f"Artifact not found: {args.artifact_id}", file=sys.stderr)
+        if args.json_output:
+            _emit_json({"error": f"Artifact not found: {args.artifact_id}"})
+        else:
+            print(f"Artifact not found: {args.artifact_id}", file=sys.stderr)
         return 1
 
     chain = registry.get_full_lineage(args.artifact_id)
+
+    if args.json_output:
+        data = [
+            {
+                "artifact_id": edge["artifact_id"],
+                "name": edge["name"],
+                "type": edge["type"],
+                "operation": edge["operation"],
+                "run_id": edge.get("run_id"),
+            }
+            for edge in chain
+        ]
+        _emit_json(data)
+        return 0
 
     print(f"Lineage for: {artifact.name} ({artifact.id})")
     if not chain:
@@ -237,6 +303,20 @@ def cmd_runs_list(args) -> int:
     status_filter = RunStatus(args.status) if args.status else None
     runs = registry.list_runs(status=status_filter, limit=args.limit)
 
+    if args.json_output:
+        data = [
+            {
+                "id": r.id,
+                "operator_name": r.operator_name,
+                "status": r.status.value,
+                "started_at": r.started_at,
+                "completed_at": r.completed_at,
+            }
+            for r in runs
+        ]
+        _emit_json(data)
+        return 0
+
     if not runs:
         print("No runs found.")
         return 0
@@ -264,8 +344,26 @@ def cmd_runs_show(args) -> int:
     run = registry.get_run(args.run_id)
 
     if run is None:
-        print(f"Run not found: {args.run_id}", file=sys.stderr)
+        if args.json_output:
+            _emit_json({"error": f"Run not found: {args.run_id}"})
+        else:
+            print(f"Run not found: {args.run_id}", file=sys.stderr)
         return 1
+
+    if args.json_output:
+        data = {
+            "id": run.id,
+            "operator_name": run.operator_name,
+            "status": run.status.value,
+            "started_at": run.started_at,
+            "completed_at": run.completed_at,
+            "params": run.params,
+            "input_ids": run.input_ids,
+            "output_id": run.output.artifact.id if run.output else None,
+            "error": run.error,
+        }
+        _emit_json(data)
+        return 0
 
     print(f"ID:        {run.id}")
     print(f"Operator:  {run.operator_name}")
@@ -321,13 +419,29 @@ def cmd_checks_show(args) -> int:
     run = registry.get_run(target_id)
 
     if artifact is None and run is None:
-        print(f"No artifact or run found for: {target_id}", file=sys.stderr)
+        if args.json_output:
+            _emit_json({"error": f"No artifact or run found for: {target_id}"})
+        else:
+            print(f"No artifact or run found for: {target_id}", file=sys.stderr)
         return 1
 
     checks = registry.get_checks(
         artifact_id=target_id if artifact else None,
         run_id=target_id if run else None,
     )
+
+    if args.json_output:
+        data = [
+            {
+                "check_name": c.check_name,
+                "state": c.state.value,
+                "message": c.message,
+                "metadata": c.metadata,
+            }
+            for c in checks
+        ]
+        _emit_json(data)
+        return 0
 
     if artifact is not None:
         label = f"artifact {artifact.name}"
@@ -369,17 +483,11 @@ def cmd_route(args) -> int:
     try:
         ref = SourceRef.infer(raw)
     except Exception as e:
-        print(f"ERROR: {e}", file=sys.stderr)
+        if args.json_output:
+            _emit_json({"error": str(e)})
+        else:
+            print(f"ERROR: {e}", file=sys.stderr)
         return 1
-
-    # Print Source section
-    print("Source")
-    print("------")
-    print(f"  raw: {raw}")
-    print(f"  kind: {ref.kind.value}")
-    if ref.params:
-        print(f"  params: {ref.params}")
-    print()
 
     # Get matches
     matches = router.select(ref)
@@ -397,6 +505,43 @@ def cmd_route(args) -> int:
             if view.connector_name == connector_name:
                 return view
         return None
+
+    if args.json_output:
+        matches_data = []
+        for match in matches:
+            view = find_view(match.connector.name, ref.kind)
+            match_dict = {
+                "connector_name": match.connector.name,
+                "reason": match.reason.value,
+                "rank": match.rank,
+                "kinds": [k.value for k in view.kinds] if view and view.kinds else [],
+                "extensions": list(view.extensions) if view and view.extensions else [],
+                "schemes": list(view.schemes) if view and view.schemes else [],
+                "prefixes": list(view.prefixes) if view and view.prefixes else [],
+            }
+            matches_data.append(match_dict)
+        data = {
+            "source": {
+                "raw": raw,
+                "kind": ref.kind.value,
+                "params": ref.params,
+            },
+            "matches": matches_data,
+            "selected": matches[0].connector.name if matches else None,
+        }
+        _emit_json(data)
+        return 0 if matches else 2
+
+    # Text mode rendering below
+
+    # Print Source section
+    print("Source")
+    print("------")
+    print(f"  raw: {raw}")
+    print(f"  kind: {ref.kind.value}")
+    if ref.params:
+        print(f"  params: {ref.params}")
+    print()
 
     # Print Matches section
     print("Matches")
@@ -448,7 +593,9 @@ def cmd_run_hydrology(args) -> int:
     # Materialize DEM through router
     router = _get_router()
     try:
-        dem_artifact = _materialize_cli_source(router, args.dem, workspace, label="DEM")
+        dem_artifact = _materialize_cli_source(
+            router, args.dem, workspace, label="DEM", quiet=args.json_output
+        )
     except ValueError as e:
         print(str(e), file=sys.stderr)
         return 1
@@ -466,19 +613,61 @@ def cmd_run_hydrology(args) -> int:
         weight=args.weight,
     )
 
-    print(f"Running hydrology flow → {hydro_dir}")
+    if not args.json_output:
+        print(f"Running hydrology flow → {hydro_dir}")
     flow_result = flow.run(dem_artifact, params)
 
     if not flow_result.success:
-        print(f"FAILED at step: {flow_result.failed_step}", file=sys.stderr)
-        print(f"Error: {flow_result.error}", file=sys.stderr)
+        if args.json_output:
+            valid = sum(1 for c in flow_result.all_checks if c.state.value == "valid")
+            invalid = sum(1 for c in flow_result.all_checks if c.state.value == "invalid")
+            warning = sum(1 for c in flow_result.all_checks if c.state.value == "warning")
+            data = {
+                "operator_name": "hydrology",
+                "status": "failed",
+                "run_id": None,
+                "output": None,
+                "checks": {"valid": valid, "invalid": invalid, "warning": warning},
+                "error": flow_result.error or f"Failed at step: {flow_result.failed_step}",
+            }
+            _emit_json(data)
+        else:
+            print(f"FAILED at step: {flow_result.failed_step}", file=sys.stderr)
+            print(f"Error: {flow_result.error}", file=sys.stderr)
         return 1
 
     invalid_rc = _handle_invalid_checks(flow_result.all_checks, "hydrology")
-    if invalid_rc:
+    if invalid_rc and not args.json_output:
         return invalid_rc
 
-    # Report results
+    # Build JSON response or text report
+    valid = sum(1 for c in flow_result.all_checks if c.state.value == "valid")
+    invalid = sum(1 for c in flow_result.all_checks if c.state.value == "invalid")
+    warning = sum(1 for c in flow_result.all_checks if c.state.value == "warning")
+
+    if args.json_output:
+        # Hydrology produces multiple artifacts - use the last run's output if available
+        final_run = flow_result.runs[-1] if flow_result.runs else None
+        output_data = None
+        if final_run and final_run.output:
+            art = final_run.output.artifact
+            output_data = {
+                "name": art.name,
+                "uri": art.backing.uri if art.backing else None,
+                "artifact_id": art.id,
+            }
+        data = {
+            "operator_name": "hydrology",
+            "status": "completed",
+            "run_id": final_run.id if final_run else None,
+            "output": output_data,
+            "checks": {"valid": valid, "invalid": invalid, "warning": warning},
+            "error": None,
+        }
+        _emit_json(data)
+        return 0 if not invalid_rc else 2
+
+    # Report results (text mode)
     print(f"\nCompleted ({len(flow_result.runs)} steps, {len(flow_result.all_checks)} checks)")
     for a in flow_result.artifacts:
         uri = a.backing.uri if a.backing else "?"
@@ -503,8 +692,12 @@ def cmd_run_zonal(args) -> int:
     # Materialize both inputs through router
     router = _get_router()
     try:
-        raster_artifact = _materialize_cli_source(router, args.raster, workspace, label="Raster")
-        zones_artifact = _materialize_cli_source(router, args.zones, workspace, label="Zones")
+        raster_artifact = _materialize_cli_source(
+            router, args.raster, workspace, label="Raster", quiet=args.json_output
+        )
+        zones_artifact = _materialize_cli_source(
+            router, args.zones, workspace, label="Zones", quiet=args.json_output
+        )
     except ValueError as e:
         print(str(e), file=sys.stderr)
         return 1
@@ -526,7 +719,8 @@ def cmd_run_zonal(args) -> int:
         zone_id_field=args.zone_id_field,
     )
 
-    print(f"Running zonal stats → {output_path}")
+    if not args.json_output:
+        print(f"Running zonal stats → {output_path}")
     run_record = executor.submit(
         ZonalStatsOperator(),
         [raster_artifact, zones_artifact],
@@ -536,14 +730,48 @@ def cmd_run_zonal(args) -> int:
 
     failure_rc = _handle_run_failure(run_record)
     if failure_rc:
+        if args.json_output:
+            valid = sum(1 for c in run_record.checks if c.state.value == "valid")
+            invalid = sum(1 for c in run_record.checks if c.state.value == "invalid")
+            warning = sum(1 for c in run_record.checks if c.state.value == "warning")
+            data = {
+                "operator_name": run_record.operator_name,
+                "status": "failed",
+                "run_id": run_record.id,
+                "output": None,
+                "checks": {"valid": valid, "invalid": invalid, "warning": warning},
+                "error": run_record.error or f"{run_record.operator_name} did not complete",
+            }
+            _emit_json(data)
         return 1
 
     invalid_rc = _handle_invalid_checks(run_record.checks, run_record.operator_name)
-    if invalid_rc:
+    if invalid_rc and not args.json_output:
         return invalid_rc
 
     # Report
     output = _require_run_output(run_record).artifact
+
+    valid = sum(1 for c in run_record.checks if c.state.value == "valid")
+    invalid = sum(1 for c in run_record.checks if c.state.value == "invalid")
+    warning = sum(1 for c in run_record.checks if c.state.value == "warning")
+
+    if args.json_output:
+        data = {
+            "operator_name": run_record.operator_name,
+            "status": "completed",
+            "run_id": run_record.id,
+            "output": {
+                "name": output.name,
+                "uri": output.backing.uri if output.backing else None,
+                "artifact_id": output.id,
+            },
+            "checks": {"valid": valid, "invalid": invalid, "warning": warning},
+            "error": None,
+        }
+        _emit_json(data)
+        return 0 if not invalid_rc else 2
+
     uri = output.backing.uri if output.backing else "?"
     print(f"\nCompleted (1 step, {len(run_record.checks)} checks)")
     print(f"  {output.name:<25} → {uri}")
@@ -567,8 +795,12 @@ def cmd_run_sample(args) -> int:
     # Materialize both inputs through router
     router = _get_router()
     try:
-        raster_artifact = _materialize_cli_source(router, args.raster, workspace, label="Raster")
-        points_artifact = _materialize_cli_source(router, args.points, workspace, label="Points")
+        raster_artifact = _materialize_cli_source(
+            router, args.raster, workspace, label="Raster", quiet=args.json_output
+        )
+        points_artifact = _materialize_cli_source(
+            router, args.points, workspace, label="Points", quiet=args.json_output
+        )
     except ValueError as e:
         print(str(e), file=sys.stderr)
         return 1
@@ -602,7 +834,8 @@ def cmd_run_sample(args) -> int:
         nodata_value=args.nodata,
     )
 
-    print(f"Running sample raster → {output_path}")
+    if not args.json_output:
+        print(f"Running sample raster → {output_path}")
     run_record = executor.submit(
         SampleRasterOperator(),
         [raster_artifact, points_artifact],
@@ -612,14 +845,48 @@ def cmd_run_sample(args) -> int:
 
     failure_rc = _handle_run_failure(run_record)
     if failure_rc:
+        if args.json_output:
+            valid = sum(1 for c in run_record.checks if c.state.value == "valid")
+            invalid = sum(1 for c in run_record.checks if c.state.value == "invalid")
+            warning = sum(1 for c in run_record.checks if c.state.value == "warning")
+            data = {
+                "operator_name": run_record.operator_name,
+                "status": "failed",
+                "run_id": run_record.id,
+                "output": None,
+                "checks": {"valid": valid, "invalid": invalid, "warning": warning},
+                "error": run_record.error or f"{run_record.operator_name} did not complete",
+            }
+            _emit_json(data)
         return 1
 
     invalid_rc = _handle_invalid_checks(run_record.checks, run_record.operator_name)
-    if invalid_rc:
+    if invalid_rc and not args.json_output:
         return invalid_rc
 
     # Report
     output = _require_run_output(run_record).artifact
+
+    valid = sum(1 for c in run_record.checks if c.state.value == "valid")
+    invalid = sum(1 for c in run_record.checks if c.state.value == "invalid")
+    warning = sum(1 for c in run_record.checks if c.state.value == "warning")
+
+    if args.json_output:
+        data = {
+            "operator_name": run_record.operator_name,
+            "status": "completed",
+            "run_id": run_record.id,
+            "output": {
+                "name": output.name,
+                "uri": output.backing.uri if output.backing else None,
+                "artifact_id": output.id,
+            },
+            "checks": {"valid": valid, "invalid": invalid, "warning": warning},
+            "error": None,
+        }
+        _emit_json(data)
+        return 0 if not invalid_rc else 2
+
     uri = output.backing.uri if output.backing else "?"
     print(f"\nCompleted (1 step, {len(run_record.checks)} checks)")
     print(f"  {output.name:<25} → {uri}")
@@ -646,7 +913,9 @@ def cmd_run_rasterize(args) -> int:
     # Materialize input through router
     router = _get_router()
     try:
-        vector_artifact = _materialize_cli_source(router, args.vector, workspace, label="Vector")
+        vector_artifact = _materialize_cli_source(
+            router, args.vector, workspace, label="Vector", quiet=args.json_output
+        )
     except ValueError as e:
         print(str(e), file=sys.stderr)
         return 1
@@ -710,7 +979,8 @@ def cmd_run_rasterize(args) -> int:
         dtype=args.dtype,
     )
 
-    print(f"Running rasterize → {output_path}")
+    if not args.json_output:
+        print(f"Running rasterize → {output_path}")
     run_record = executor.submit(
         RasterizeVectorOperator(),
         [vector_artifact],
@@ -720,14 +990,48 @@ def cmd_run_rasterize(args) -> int:
 
     failure_rc = _handle_run_failure(run_record)
     if failure_rc:
+        if args.json_output:
+            valid = sum(1 for c in run_record.checks if c.state.value == "valid")
+            invalid = sum(1 for c in run_record.checks if c.state.value == "invalid")
+            warning = sum(1 for c in run_record.checks if c.state.value == "warning")
+            data = {
+                "operator_name": run_record.operator_name,
+                "status": "failed",
+                "run_id": run_record.id,
+                "output": None,
+                "checks": {"valid": valid, "invalid": invalid, "warning": warning},
+                "error": run_record.error or f"{run_record.operator_name} did not complete",
+            }
+            _emit_json(data)
         return 1
 
     invalid_rc = _handle_invalid_checks(run_record.checks, run_record.operator_name)
-    if invalid_rc:
+    if invalid_rc and not args.json_output:
         return invalid_rc
 
     # Report
     output = _require_run_output(run_record).artifact
+
+    valid = sum(1 for c in run_record.checks if c.state.value == "valid")
+    invalid = sum(1 for c in run_record.checks if c.state.value == "invalid")
+    warning = sum(1 for c in run_record.checks if c.state.value == "warning")
+
+    if args.json_output:
+        data = {
+            "operator_name": run_record.operator_name,
+            "status": "completed",
+            "run_id": run_record.id,
+            "output": {
+                "name": output.name,
+                "uri": output.backing.uri if output.backing else None,
+                "artifact_id": output.id,
+            },
+            "checks": {"valid": valid, "invalid": invalid, "warning": warning},
+            "error": None,
+        }
+        _emit_json(data)
+        return 0 if not invalid_rc else 2
+
     uri = output.backing.uri if output.backing else "?"
     print(f"\nCompleted (1 step, {len(run_record.checks)} checks)")
     print(f"  {output.name:<25} → {uri}")
@@ -901,7 +1205,9 @@ def cmd_run_generic(args) -> int:
     artifacts = []
     for input_path_str in input_paths:
         try:
-            artifact = _materialize_cli_source(router, input_path_str, workspace, label="Input")
+            artifact = _materialize_cli_source(
+                router, input_path_str, workspace, label="Input", quiet=args.json_output
+            )
         except ValueError as e:
             print(str(e), file=sys.stderr)
             return 1
@@ -914,20 +1220,55 @@ def cmd_run_generic(args) -> int:
         registry.save_artifact(art)
 
     # 7. Execute
-    print(f"Running {operator_name} → {output_path}")
+    if not args.json_output:
+        print(f"Running {operator_name} → {output_path}")
     run_record = executor.submit(operator, artifacts, params)
     registry.save_run(run_record)
 
     failure_rc = _handle_run_failure(run_record)
     if failure_rc:
+        if args.json_output:
+            valid = sum(1 for c in run_record.checks if c.state.value == "valid")
+            invalid = sum(1 for c in run_record.checks if c.state.value == "invalid")
+            warning = sum(1 for c in run_record.checks if c.state.value == "warning")
+            data = {
+                "operator_name": run_record.operator_name,
+                "status": "failed",
+                "run_id": run_record.id,
+                "output": None,
+                "checks": {"valid": valid, "invalid": invalid, "warning": warning},
+                "error": run_record.error or f"{run_record.operator_name} did not complete",
+            }
+            _emit_json(data)
         return failure_rc
 
     invalid_rc = _handle_invalid_checks(run_record.checks, run_record.operator_name)
-    if invalid_rc:
+    if invalid_rc and not args.json_output:
         return invalid_rc
 
     # 9. Report
     output_artifact = _require_run_output(run_record).artifact
+
+    valid = sum(1 for c in run_record.checks if c.state.value == "valid")
+    invalid = sum(1 for c in run_record.checks if c.state.value == "invalid")
+    warning = sum(1 for c in run_record.checks if c.state.value == "warning")
+
+    if args.json_output:
+        data = {
+            "operator_name": run_record.operator_name,
+            "status": "completed",
+            "run_id": run_record.id,
+            "output": {
+                "name": output_artifact.name,
+                "uri": output_artifact.backing.uri if output_artifact.backing else None,
+                "artifact_id": output_artifact.id,
+            },
+            "checks": {"valid": valid, "invalid": invalid, "warning": warning},
+            "error": None,
+        }
+        _emit_json(data)
+        return 0 if not invalid_rc else 2
+
     uri = output_artifact.backing.uri if output_artifact.backing else "?"
     print(f"\nCompleted (1 step, {len(run_record.checks)} checks)")
     print(f"  {output_artifact.name:<25} → {uri}")
@@ -944,6 +1285,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="quarry",
         description="Quarry — geospatial execution substrate",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        dest="json_output",
+        help="Emit machine-readable JSON instead of human text",
     )
     subparsers = parser.add_subparsers(dest="command")
 
