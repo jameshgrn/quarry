@@ -1,0 +1,4 @@
+[plan]
+name = "cli-json-params-nested"
+summary = "Replace default=str JSON fallback with a custom encoder that emits MappingProxyType as nested dicts, so SourceRef.params shows as JSON object not Python repr."
+sections = ["tasks"]

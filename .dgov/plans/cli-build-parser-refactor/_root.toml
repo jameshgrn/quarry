@@ -1,0 +1,4 @@
+[plan]
+name = "cli-build-parser-refactor"
+summary = "Decompose build_parser (183 lines) into per-command subparser helper functions; pure refactor, no behavioral change."
+sections = ["tasks"]
