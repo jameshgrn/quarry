@@ -1,0 +1,4 @@
+[plan]
+name = "topojson-geometry-decompose"
+summary = "Decompose _geometry_to_geojson in quarry-connectors/topojson.py into per-type helpers. Pure refactor — no behavior change."
+sections = ["tasks"]
