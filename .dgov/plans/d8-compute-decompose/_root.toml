@@ -1,0 +1,4 @@
+[plan]
+name = "d8-compute-decompose"
+summary = "Decompose _compute_d8 in d8_flow_direction.py into named helpers for legibility. Pure refactor — no behavior change."
+sections = ["tasks"]

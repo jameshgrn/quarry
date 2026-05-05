@@ -1,0 +1,35 @@
+[tasks.extract-helpers]
+summary = "Extract steepest-descent and flat-resolution helpers from _compute_d8 in d8_flow_direction.py. Pure refactor — no behavior change."
+prompt = """
+Orient:
+- Read `packages/quarry-operators/src/quarry_operators/d8_flow_direction.py` end-to-end. The module-level `_compute_d8(dem, valid)` function starts at line 345 and is 73 lines, cyclomatic 29, cognitive 72 per sentrux — the top long-function offender in this module. It implements a two-pass D8 algorithm: Pass 1 walks every cell and assigns a steepest-descent direction (or OUTLET for boundary cells with no lower neighbor, or PIT for interior cells with no lower neighbor); Pass 2 iteratively resolves PIT cells on flat surfaces by routing them to an equal-elevation neighbor that already drains.
+- Lane: operator (refactor only). One logical commit.
+- Doctrine: this is a strict refactor. No public behavior change. The existing pressure tests in `tests/pressure_test/test_d8_flow_direction.py` must keep passing without modification — including direct calls into `_compute_d8(dem, valid)` (test imports it by name) and assertions on direction codes, OUTLET on boundary, PIT on unfilled interiors, NODATA on masked cells, flat-surface resolution behavior, lineage, metadata, and check states.
+- HARD BOUNDARY: only `packages/quarry-operators/src/quarry_operators/d8_flow_direction.py` may be MODIFIED. The test file `tests/pressure_test/test_d8_flow_direction.py` is in `files.read` ONLY — do not open for editing, do not modify, do not delete. dgov diffs the final commit; any line change in a read-only file is a contract violation. The settlement gate runs the full pressure suite — trust it; do NOT run pytest yourself.
+
+Edit:
+1. In `packages/quarry-operators/src/quarry_operators/d8_flow_direction.py`, refactor the module-level `_compute_d8(dem: np.ndarray, valid: np.ndarray) -> np.ndarray` so its body becomes orchestration only (allocate the `flow` int8 grid, call the two passes in order, return). Extract these private module-level helpers, placed BEFORE `_compute_d8` (and after the existing constants block / before `_count_internal_outlets` is fine — keep `_count_internal_outlets` where it is):
+   a. `_steepest_descent_at(dem: np.ndarray, valid: np.ndarray, r: int, c: int, nrows: int, ncols: int) -> int` — the inner per-cell logic from Pass 1: iterate the 8 D8 offsets, skip out-of-bounds and invalid neighbors, compute `drop = dem[r,c] - dem[nr,nc]`, divide by `D8_DIST[d]` when positive, track the max-slope direction. Return the best direction code in `0..7`, or `-1` if no strictly-lower neighbor was found. Do NOT decide OUTLET vs PIT here — that classification stays in the caller.
+   b. `_assign_steepest_descent(dem: np.ndarray, valid: np.ndarray, flow: np.ndarray) -> None` — Pass 1 driver. Walks every `(r, c)`, skips invalid cells, calls `_steepest_descent_at(...)`, and writes into `flow`: the returned `0..7` if found, else `OUTLET` when the cell is on the grid boundary (`r == 0 or r == nrows-1 or c == 0 or c == ncols-1`), else `PIT`. Mutates `flow` in place; returns `None`.
+   c. `_resolve_flat_pits(dem: np.ndarray, valid: np.ndarray, flow: np.ndarray) -> None` — Pass 2 driver. The existing `while changed:` loop: for each `PIT` cell, scan the 8 neighbors and reassign to the first neighbor with `dem[nr,nc] <= dem[r,c]` and `0 <= flow[nr,nc] <= OUTLET`; iterate until stable. Mutates `flow` in place; returns `None`.
+2. After extraction, `_compute_d8` should read approximately as:
+   - allocate `flow = np.full((nrows, ncols), NODATA, dtype=np.int8)`
+   - `_assign_steepest_descent(dem, valid, flow)`
+   - `_resolve_flat_pits(dem, valid, flow)`
+   - `return flow`
+   Keep its existing docstring (the two-pass description) intact on `_compute_d8`.
+3. Helper placement: module-level private functions (`def _helper_name(...)`), NOT methods on `D8FlowDirectionOperator`. Type hints required on every parameter and return type, matching the signatures above. Use the existing module-level constants (`D8_DR`, `D8_DC`, `D8_DIST`, `OUTLET`, `PIT`, `NODATA`) directly — do not redefine them, do not pass them as arguments.
+4. Do NOT change: the `_compute_d8` public signature, the `_count_internal_outlets` function, `D8FlowDirectionOperator` (any method, including `execute`, `validate_inputs`, `_run_checks`, `declared_checks`, `name`, `spec`), `D8FlowDirectionParams`, the module-level constants, the direction encoding, the algorithm semantics, or the tie-breaking behavior (strict `>` for steepest-descent, first-match in flat resolution).
+5. Do NOT change the public function signature, the algorithm, the return shape, or any caller-visible behavior. Do NOT add new validation, new dataclass fields, new lineage params, new checks, new constants, vectorization, numba, or any "while you're here" cleanup. The existing pressure tests in `tests/pressure_test/test_d8_flow_direction.py` must pass without modification.
+
+Verify:
+- `uv run ruff check packages/quarry-operators/src/quarry_operators/d8_flow_direction.py`
+- `uv run ruff format --check packages/quarry-operators/src/quarry_operators/d8_flow_direction.py`
+- Quick syntax / import sanity: `uv run python -c "from quarry_operators.d8_flow_direction import D8FlowDirectionOperator, D8FlowDirectionParams, _compute_d8, _steepest_descent_at, _assign_steepest_descent, _resolve_flat_pits, D8_DR, D8_DC, OUTLET, PIT, NODATA; print('ok')"`
+- The settlement gate runs the full pressure suite — trust it; do NOT run pytest yourself. The existing tests in `tests/pressure_test/test_d8_flow_direction.py` (which import `_compute_d8` directly and exercise uniform slopes, diagonal weighting, boundary OUTLET, unfilled PIT, NODATA masking, cone radial flow, flat-surface resolution, and the FillDepressions->D8 chain) must pass with no source changes to the test file.
+"""
+commit_message = "quarry-operators: extract d8 compute helpers"
+self_review = true
+
+files.edit = ["packages/quarry-operators/src/quarry_operators/d8_flow_direction.py"]
+files.read = ["tests/pressure_test/test_d8_flow_direction.py"]
