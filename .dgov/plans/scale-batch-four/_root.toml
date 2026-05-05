@@ -1,0 +1,4 @@
+[plan]
+name = "scale-batch-four"
+summary = "Four parallel tasks: 3 refactors (hillshade, watershed example, hydrology flow) + 1 feature add (rasterize line/point). Tests parallel scaling beyond 3 and mixed refactor + feature work."
+sections = ["tasks"]
