@@ -154,6 +154,160 @@ def _to_float(value: Any) -> float | None:
     return None
 
 
+def _open_workbook_and_sheet(
+    file_path: Path,
+    sheet_name: str | None,
+) -> tuple[Any, Any, str, list[str]]:
+    """Validate file existence and open Excel workbook, selecting the requested sheet.
+
+    Returns:
+        Tuple of (workbook, worksheet, resolved_sheet_name, sheet_names)
+    """
+    if not HAS_OPENPYXL:
+        raise MaterializeError(
+            str(file_path),
+            "openpyxl is required for Excel support. Install with: pip install openpyxl",
+        )
+
+    if not file_path.exists():
+        raise MaterializeError(str(file_path), f"File not found: {file_path}")
+
+    if file_path.stat().st_size == 0:
+        raise MaterializeError(str(file_path), "File is empty")
+
+    try:
+        wb = openpyxl.load_workbook(str(file_path), read_only=True, data_only=True)
+    except Exception as e:
+        raise MaterializeError(str(file_path), f"Failed to open Excel file: {e}") from e
+
+    sheet_names = wb.sheetnames
+
+    if sheet_name is not None:
+        if sheet_name not in sheet_names:
+            wb.close()
+            raise MaterializeError(
+                str(file_path), f"Sheet not found: '{sheet_name}'. Available: {sheet_names}"
+            )
+        ws = wb[sheet_name]
+    else:
+        ws = wb.active
+        sheet_name = ws.title
+
+    return wb, ws, sheet_name, sheet_names
+
+
+def _read_header_row(wb: Any, ws: Any, file_path: Path) -> list[str]:
+    """Read the header row from the worksheet."""
+    try:
+        headers = []
+        for cell in next(ws.rows):
+            headers.append(str(cell.value) if cell.value is not None else "")
+    except StopIteration:
+        wb.close()
+        raise MaterializeError(str(file_path), "Sheet has no header row")
+    return headers
+
+
+def _resolve_coordinate_columns(
+    headers: list[str],
+    explicit_lon_col: str | None,
+    explicit_lat_col: str | None,
+    wb: Any,
+    file_path: Path,
+) -> tuple[str | None, str | None, str | None]:
+    """Resolve longitude and latitude columns.
+
+    Returns:
+        Tuple of (lon_col, lat_col, crs_hint)
+    """
+    lon_col: str | None = explicit_lon_col
+    lat_col: str | None = explicit_lat_col
+    crs_hint: str | None = None
+
+    if lon_col is None or lat_col is None:
+        detected_lon, detected_lat, detected_crs = _detect_coordinate_columns(headers)
+        if lon_col is None:
+            lon_col = detected_lon
+        if lat_col is None:
+            lat_col = detected_lat
+        crs_hint = detected_crs
+    else:
+        if lon_col not in headers:
+            wb.close()
+            raise MaterializeError(
+                str(file_path), f"Explicit longitude column not found: {lon_col}"
+            )
+        if lat_col not in headers:
+            wb.close()
+            raise MaterializeError(str(file_path), f"Explicit latitude column not found: {lat_col}")
+        norm_lon = _normalize_column(lon_col)
+        norm_lat = _normalize_column(lat_col)
+        if norm_lon in ("lon", "longitude", "lng", "long") or norm_lat in (
+            "lat",
+            "latitude",
+        ):
+            crs_hint = "EPSG:4326"
+
+    return lon_col, lat_col, crs_hint
+
+
+def _scan_data_rows(
+    ws: Any,
+    headers: list[str],
+    lon_col: str | None,
+    lat_col: str | None,
+    wb: Any,
+    file_path: Path,
+) -> tuple[int, int, tuple[float, float, float, float] | None]:
+    """Scan data rows to count rows and calculate extent.
+
+    Returns:
+        Tuple of (row_count, valid_feature_count, extent)
+    """
+    row_count = 0
+    valid_feature_count = 0
+    extent: tuple[float, float, float, float] | None = None
+    x_values: list[float] = []
+    y_values: list[float] = []
+
+    has_coordinates = lon_col is not None and lat_col is not None
+
+    if has_coordinates:
+        try:
+            lon_idx = headers.index(lon_col)
+            lat_idx = headers.index(lat_col)
+        except ValueError:
+            wb.close()
+            raise MaterializeError(
+                str(file_path), f"Coordinate column not found in headers: {lon_col}, {lat_col}"
+            )
+
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            row_count += 1
+
+            if len(row) <= max(lon_idx, lat_idx):
+                continue
+
+            lon_val = row[lon_idx]
+            lat_val = row[lat_idx]
+
+            if _is_numeric(lon_val) and _is_numeric(lat_val):
+                x = _to_float(lon_val)
+                y = _to_float(lat_val)
+                if x is not None and y is not None:
+                    x_values.append(x)
+                    y_values.append(y)
+                    valid_feature_count += 1
+    else:
+        for _ in ws.iter_rows(min_row=2, values_only=True):
+            row_count += 1
+
+    if x_values and y_values:
+        extent = (min(x_values), min(y_values), max(x_values), max(y_values))
+
+    return row_count, valid_feature_count, extent
+
+
 def _read_excel_metadata(
     file_path: Path,
     sheet_name: str | None = None,
@@ -174,130 +328,22 @@ def _read_excel_metadata(
     - valid_feature_count: count of rows with valid numeric coordinates
     - extent: (xmin, ymin, xmax, ymax) or None
     """
-    if not HAS_OPENPYXL:
-        raise MaterializeError(
-            str(file_path),
-            "openpyxl is required for Excel support. Install with: pip install openpyxl",
-        )
-
-    if not file_path.exists():
-        raise MaterializeError(str(file_path), f"File not found: {file_path}")
-
-    if file_path.stat().st_size == 0:
-        raise MaterializeError(str(file_path), "File is empty")
-
-    try:
-        wb = openpyxl.load_workbook(str(file_path), read_only=True, data_only=True)
-    except Exception as e:
-        raise MaterializeError(str(file_path), f"Failed to open Excel file: {e}") from e
-
-    # Get sheet names
-    sheet_names = wb.sheetnames
-
-    # Select sheet
-    if sheet_name is not None:
-        if sheet_name not in sheet_names:
-            wb.close()
-            raise MaterializeError(
-                str(file_path), f"Sheet not found: '{sheet_name}'. Available: {sheet_names}"
-            )
-        ws = wb[sheet_name]
-    else:
-        # Use first sheet by default
-        ws = wb.active
-        sheet_name = ws.title
-
-    # Read header row
-    try:
-        headers = []
-        for cell in next(ws.rows):
-            headers.append(str(cell.value) if cell.value is not None else "")
-    except StopIteration:
-        wb.close()
-        raise MaterializeError(str(file_path), "Sheet has no header row")
-
-    # Detect coordinate columns if not explicitly provided
-    lon_col: str | None = explicit_lon_col
-    lat_col: str | None = explicit_lat_col
-    crs_hint: str | None = None
-
-    if lon_col is None or lat_col is None:
-        detected_lon, detected_lat, detected_crs = _detect_coordinate_columns(headers)
-        if lon_col is None:
-            lon_col = detected_lon
-        if lat_col is None:
-            lat_col = detected_lat
-        crs_hint = detected_crs
-    else:
-        # Validate explicit columns exist
-        if lon_col not in headers:
-            wb.close()
-            raise MaterializeError(
-                str(file_path), f"Explicit longitude column not found: {lon_col}"
-            )
-        if lat_col not in headers:
-            wb.close()
-            raise MaterializeError(str(file_path), f"Explicit latitude column not found: {lat_col}")
-        # Determine CRS from explicit column names
-        norm_lon = _normalize_column(lon_col)
-        norm_lat = _normalize_column(lat_col)
-        if norm_lon in ("lon", "longitude", "lng", "long") or norm_lat in (
-            "lat",
-            "latitude",
-        ):
-            crs_hint = "EPSG:4326"
-
+    wb, ws, resolved_sheet_name, sheet_names = _open_workbook_and_sheet(file_path, sheet_name)
+    headers = _read_header_row(wb, ws, file_path)
+    lon_col, lat_col, crs_hint = _resolve_coordinate_columns(
+        headers, explicit_lon_col, explicit_lat_col, wb, file_path
+    )
     has_coordinates = lon_col is not None and lat_col is not None
-
-    # Count rows and calculate extent
-    row_count = 0
-    valid_feature_count = 0
-    extent: tuple[float, float, float, float] | None = None
-    x_values: list[float] = []
-    y_values: list[float] = []
-
-    if has_coordinates:
-        try:
-            lon_idx = headers.index(lon_col)
-            lat_idx = headers.index(lat_col)
-        except ValueError:
-            wb.close()
-            raise MaterializeError(
-                str(file_path), f"Coordinate column not found in headers: {lon_col}, {lat_col}"
-            )
-
-        # Skip header row and iterate through data rows
-        for row in ws.iter_rows(min_row=2, values_only=True):
-            row_count += 1
-
-            if len(row) <= max(lon_idx, lat_idx):
-                continue  # Skip malformed rows
-
-            lon_val = row[lon_idx]
-            lat_val = row[lat_idx]
-
-            if _is_numeric(lon_val) and _is_numeric(lat_val):
-                x = _to_float(lon_val)
-                y = _to_float(lat_val)
-                if x is not None and y is not None:
-                    x_values.append(x)
-                    y_values.append(y)
-                    valid_feature_count += 1
-    else:
-        # Just count rows for table data
-        for _ in ws.iter_rows(min_row=2, values_only=True):
-            row_count += 1
+    row_count, valid_feature_count, extent = _scan_data_rows(
+        ws, headers, lon_col, lat_col, wb, file_path
+    )
 
     wb.close()
-
-    # Calculate extent from valid coordinates
-    if x_values and y_values:
-        extent = (min(x_values), min(y_values), max(x_values), max(y_values))
 
     return {
         "columns": headers,
         "row_count": row_count,
-        "sheet_name": sheet_name,
+        "sheet_name": resolved_sheet_name,
         "sheet_names": sheet_names,
         "lon_col": lon_col,
         "lat_col": lat_col,
