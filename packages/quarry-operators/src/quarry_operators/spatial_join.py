@@ -36,6 +36,126 @@ from quarry_core.operator import (
 _SUPPORTED_PREDICATES: frozenset[str] = frozenset({"intersects", "contains", "within", "touches"})
 
 
+def _load_right_features(uri: str) -> tuple[list[tuple[object, dict]], dict[str, str]]:
+    """Open right vector with fiona and build in-memory (geom, props) list."""
+    import fiona
+    from shapely.geometry import shape
+
+    right_features: list[tuple[object, dict]] = []
+    right_schema_props: dict[str, str] = {}
+    with fiona.open(uri) as right_src:
+        right_schema_props = dict(right_src.schema.get("properties", {}))
+        for feat in right_src:
+            geom = shape(feat["geometry"]) if feat["geometry"] else None
+            right_features.append((geom, dict(feat.get("properties", {}))))
+    return right_features, right_schema_props
+
+
+def _build_merged_schema(
+    left_schema_props: dict[str, str],
+    right_schema_props: dict[str, str],
+    left_geom_type: str,
+) -> tuple[dict, dict[str, str], dict[str, None]]:
+    """Apply '_right' suffix collision rule; returns (out_schema, renames, null_right_template)."""
+    collision_renames: dict[str, str] = {}
+    merged_schema_props = dict(left_schema_props)
+    for rkey, rtype in right_schema_props.items():
+        if rkey in merged_schema_props:
+            new_key = f"{rkey}_right"
+            collision_renames[rkey] = new_key
+            merged_schema_props[new_key] = rtype
+        else:
+            merged_schema_props[rkey] = rtype
+
+    out_schema = {
+        "geometry": left_geom_type,
+        "properties": merged_schema_props,
+    }
+
+    null_right: dict[str, None] = {}
+    for rkey in right_schema_props:
+        out_key = collision_renames.get(rkey, rkey)
+        null_right[out_key] = None
+
+    return out_schema, collision_renames, null_right
+
+
+def _run_join_loop(
+    left_uri: str,
+    output_path: Path,
+    out_schema: dict,
+    left_crs: object,
+    right_features: list[tuple[object, dict]],
+    collision_renames: dict[str, str],
+    null_right: dict[str, None],
+    predicate: str,
+) -> tuple[int, int]:
+    """Open left + output writer, iterate left features, dispatch predicate, emit rows.
+
+    Returns (left_feature_count, output_feature_count).
+    """
+    import fiona
+    from shapely.geometry import shape
+    from shapely.prepared import prep
+
+    left_feature_count = 0
+    output_feature_count = 0
+
+    with fiona.open(left_uri) as left_src:
+        with fiona.open(
+            output_path,
+            "w",
+            driver="GeoJSON",
+            crs=left_crs,
+            schema=out_schema,
+        ) as dst:
+            for left_feat in left_src:
+                left_feature_count += 1
+                left_geom = shape(left_feat["geometry"]) if left_feat["geometry"] else None
+                left_props = dict(left_feat.get("properties", {}))
+
+                matches = []
+                if left_geom is not None and not left_geom.is_empty:
+                    prepared = prep(left_geom)
+                    for right_geom, right_props in right_features:
+                        if right_geom is None or right_geom.is_empty:
+                            continue
+                        if getattr(prepared, predicate)(right_geom):
+                            matches.append(right_props)
+
+                if not matches:
+                    # No match — emit left feature with null right attrs
+                    merged = {**left_props, **null_right}
+                    dst.write(
+                        {
+                            "geometry": left_feat["geometry"],
+                            "properties": merged,
+                        }
+                    )
+                    output_feature_count += 1
+                else:
+                    # One or more matches — emit one row per match
+                    for right_props in matches:
+                        renamed_right = {}
+                        for rkey, rval in right_props.items():
+                            out_key = collision_renames.get(rkey, rkey)
+                            renamed_right[out_key] = rval
+                        # Fill missing right keys with None
+                        for nk, nv in null_right.items():
+                            if nk not in renamed_right:
+                                renamed_right[nk] = nv
+                        merged = {**left_props, **renamed_right}
+                        dst.write(
+                            {
+                                "geometry": left_feat["geometry"],
+                                "properties": merged,
+                            }
+                        )
+                        output_feature_count += 1
+
+    return left_feature_count, output_feature_count
+
+
 @dataclass(frozen=True)
 class SpatialJoinParams(OperatorParams):
     """Parameters for spatial join."""
@@ -116,8 +236,6 @@ class SpatialJoinOperator:
         import time
 
         import fiona
-        from shapely.geometry import shape
-        from shapely.prepared import prep
 
         t0 = time.monotonic()
 
@@ -127,99 +245,31 @@ class SpatialJoinOperator:
 
         try:
             # Read right features into memory (spatial index side)
-            right_features: list[tuple[object, dict]] = []
-            right_schema_props: dict[str, str] = {}
-            with fiona.open(right_artifact.backing.uri) as right_src:
-                right_schema_props = dict(right_src.schema.get("properties", {}))
-                for feat in right_src:
-                    geom = shape(feat["geometry"]) if feat["geometry"] else None
-                    right_features.append((geom, dict(feat.get("properties", {}))))
+            right_features, right_schema_props = _load_right_features(right_artifact.backing.uri)
 
-            # Read left schema
+            # Read left schema, CRS, and geometry type
             with fiona.open(left_artifact.backing.uri) as left_src:
                 left_schema_props = dict(left_src.schema.get("properties", {}))
                 left_crs = left_src.crs
                 left_geom_type = left_src.schema["geometry"]
 
-            # Resolve schema collisions: right columns that collide get '_right' suffix
-            collision_renames: dict[str, str] = {}
-            merged_schema_props = dict(left_schema_props)
-            for rkey, rtype in right_schema_props.items():
-                if rkey in merged_schema_props:
-                    new_key = f"{rkey}_right"
-                    collision_renames[rkey] = new_key
-                    merged_schema_props[new_key] = rtype
-                else:
-                    merged_schema_props[rkey] = rtype
-
-            # Build output schema
-            out_schema = {
-                "geometry": left_geom_type,
-                "properties": merged_schema_props,
-            }
-
-            # Null right properties template
-            null_right: dict[str, None] = {}
-            for rkey in right_schema_props:
-                out_key = collision_renames.get(rkey, rkey)
-                null_right[out_key] = None
-
-            # Perform spatial join and write output
-            left_feature_count = 0
-            output_feature_count = 0
+            # Build merged schema with collision handling
+            out_schema, collision_renames, null_right = _build_merged_schema(
+                left_schema_props, right_schema_props, left_geom_type
+            )
             had_collision = bool(collision_renames)
 
-            with fiona.open(left_artifact.backing.uri) as left_src:
-                with fiona.open(
-                    output_path,
-                    "w",
-                    driver="GeoJSON",
-                    crs=left_crs,
-                    schema=out_schema,
-                ) as dst:
-                    for left_feat in left_src:
-                        left_feature_count += 1
-                        left_geom = shape(left_feat["geometry"]) if left_feat["geometry"] else None
-                        left_props = dict(left_feat.get("properties", {}))
-
-                        matches = []
-                        if left_geom is not None and not left_geom.is_empty:
-                            prepared = prep(left_geom)
-                            for right_geom, right_props in right_features:
-                                if right_geom is None or right_geom.is_empty:
-                                    continue
-                                if getattr(prepared, params.predicate)(right_geom):
-                                    matches.append(right_props)
-
-                        if not matches:
-                            # No match — emit left feature with null right attrs
-                            merged = {**left_props, **null_right}
-                            dst.write(
-                                {
-                                    "geometry": left_feat["geometry"],
-                                    "properties": merged,
-                                }
-                            )
-                            output_feature_count += 1
-                        else:
-                            # One or more matches — emit one row per match
-                            for right_props in matches:
-                                renamed_right = {}
-                                for rkey, rval in right_props.items():
-                                    out_key = collision_renames.get(rkey, rkey)
-                                    renamed_right[out_key] = rval
-                                # Fill missing right keys with None
-                                for nk, nv in null_right.items():
-                                    if nk not in renamed_right:
-                                        renamed_right[nk] = nv
-                                merged = {**left_props, **renamed_right}
-                                dst.write(
-                                    {
-                                        "geometry": left_feat["geometry"],
-                                        "properties": merged,
-                                    }
-                                )
-                                output_feature_count += 1
+            # Perform spatial join and write output
+            left_feature_count, output_feature_count = _run_join_loop(
+                left_uri=left_artifact.backing.uri,
+                output_path=output_path,
+                out_schema=out_schema,
+                left_crs=left_crs,
+                right_features=right_features,
+                collision_renames=collision_renames,
+                null_right=null_right,
+                predicate=params.predicate,
+            )
 
         except OperatorError:
             raise
