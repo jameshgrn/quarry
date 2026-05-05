@@ -342,56 +342,78 @@ class D8FlowDirectionOperator:
 # ---------------------------------------------------------------------------
 
 
-def _compute_d8(dem: np.ndarray, valid: np.ndarray) -> np.ndarray:
-    """Compute D8 flow direction for every cell.
+def _steepest_descent_at(
+    dem: np.ndarray, valid: np.ndarray, r: int, c: int, nrows: int, ncols: int
+) -> int:
+    """Find the steepest descent direction for a single cell.
 
-    Two-pass algorithm:
-    1. Steepest descent to strictly lower neighbors
-    2. Flat resolution: PIT cells flow to equal-elevation neighbors that can drain
+    Iterates the 8 D8 offsets, skips out-of-bounds and invalid neighbors,
+    computes drop / distance for strictly lower neighbors, and returns the
+    direction with maximum slope.
 
-    Returns int array with codes: 0-7 (directions), 8 (OUTLET), 9 (PIT), -1 (NODATA).
+    Returns:
+        Direction code 0..7 if a strictly-lower neighbor was found, else -1.
+    """
+    max_slope = 0.0
+    best_dir = -1
+
+    for d in range(8):
+        nr = r + D8_DR[d]
+        nc = c + D8_DC[d]
+
+        if nr < 0 or nr >= nrows or nc < 0 or nc >= ncols:
+            continue
+        if not valid[nr, nc]:
+            continue
+
+        drop = dem[r, c] - dem[nr, nc]
+        if drop > 0:
+            slope = drop / D8_DIST[d]
+            if slope > max_slope:
+                max_slope = slope
+                best_dir = d
+
+    return best_dir
+
+
+def _assign_steepest_descent(dem: np.ndarray, valid: np.ndarray, flow: np.ndarray) -> None:
+    """Pass 1: Assign steepest descent direction or special codes.
+
+    Walks every cell, skips invalid cells, and writes into flow:
+    - Direction 0..7 if a strictly-lower neighbor exists
+    - OUTLET if the cell is on the grid boundary with no lower neighbor
+    - PIT if the cell is interior with no lower neighbor
+
+    Mutates flow in place.
     """
     nrows, ncols = dem.shape
-    flow = np.full((nrows, ncols), NODATA, dtype=np.int8)
 
-    # Pass 1: strict steepest descent
     for r in range(nrows):
         for c in range(ncols):
             if not valid[r, c]:
                 continue
 
-            is_boundary = r == 0 or r == nrows - 1 or c == 0 or c == ncols - 1
-
-            max_slope = 0.0
-            best_dir = -1
-
-            for d in range(8):
-                nr = r + D8_DR[d]
-                nc = c + D8_DC[d]
-
-                if nr < 0 or nr >= nrows or nc < 0 or nc >= ncols:
-                    continue
-                if not valid[nr, nc]:
-                    continue
-
-                drop = dem[r, c] - dem[nr, nc]
-                if drop > 0:
-                    slope = drop / D8_DIST[d]
-                    if slope > max_slope:
-                        max_slope = slope
-                        best_dir = d
+            best_dir = _steepest_descent_at(dem, valid, r, c, nrows, ncols)
 
             if best_dir >= 0:
                 flow[r, c] = best_dir
-            elif is_boundary:
+            elif r == 0 or r == nrows - 1 or c == 0 or c == ncols - 1:
                 flow[r, c] = OUTLET
             else:
                 flow[r, c] = PIT
 
-    # Pass 2: resolve flat-region PITs via iterative drainage propagation.
-    # A PIT on a flat surface can flow to an equal-elevation neighbor that
-    # already has a valid direction (0-7 or OUTLET). Iterate until stable.
+
+def _resolve_flat_pits(dem: np.ndarray, valid: np.ndarray, flow: np.ndarray) -> None:
+    """Pass 2: Resolve PIT cells on flat surfaces via iterative drainage.
+
+    A PIT on a flat surface can flow to an equal-elevation neighbor that
+    already has a valid direction (0-7 or OUTLET). Iterates until stable.
+
+    Mutates flow in place.
+    """
+    nrows, ncols = dem.shape
     changed = True
+
     while changed:
         changed = False
         for r in range(nrows):
@@ -408,11 +430,26 @@ def _compute_d8(dem: np.ndarray, valid: np.ndarray) -> np.ndarray:
                     if not valid[nr, nc]:
                         continue
 
-                    # Equal elevation and neighbor can drain
                     if dem[nr, nc] <= dem[r, c] and 0 <= flow[nr, nc] <= OUTLET:
                         flow[r, c] = d
                         changed = True
                         break
+
+
+def _compute_d8(dem: np.ndarray, valid: np.ndarray) -> np.ndarray:
+    """Compute D8 flow direction for every cell.
+
+    Two-pass algorithm:
+    1. Steepest descent to strictly lower neighbors
+    2. Flat resolution: PIT cells flow to equal-elevation neighbors that can drain
+
+    Returns int array with codes: 0-7 (directions), 8 (OUTLET), 9 (PIT), -1 (NODATA).
+    """
+    nrows, ncols = dem.shape
+    flow = np.full((nrows, ncols), NODATA, dtype=np.int8)
+
+    _assign_steepest_descent(dem, valid, flow)
+    _resolve_flat_pits(dem, valid, flow)
 
     return flow
 
