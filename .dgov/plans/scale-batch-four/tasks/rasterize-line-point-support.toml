@@ -1,0 +1,47 @@
+[tasks.rasterize-line-point-support]
+summary = "Add LineString/Point/MultiPolygon test coverage for RasterizeVectorOperator and update doctext to reflect that the operator already accepts non-polygon geometries via rasterio.features.rasterize."
+prompt = """
+Orient:
+- Read `packages/quarry-operators/src/quarry_operators/rasterize_vector.py` end-to-end. Note: post-recent-refactor, `_rasterize_single_band` and `_rasterize_multi_band` are module-level helpers. They use `from shapely.geometry import shape` and `mapping`, then hand the GeoJSON dict to `rasterio.features.rasterize`. **There is no geometry-type filter** — `rasterio.features.rasterize` natively accepts Point, LineString, Polygon, and Multi variants. `validate_inputs` only checks ArtifactType.VECTOR + materialized + params; no geometry-type assertion. So the operator already supports line/point geometries — the AGENTS.md debt entry "RasterizeVector only tested with polygons — line/point rasterization deferred" is primarily about test coverage and doctext.
+- Read `tests/pressure_test/test_rasterize_vector.py` to learn the existing fixture pattern: shared `op` and `workspace` fixtures, `_write_vector(path, geometries, crs_epsg=32610, properties=None, schema_props=None)` helper that hardcodes the geometry-type to "Polygon" via inference of the first geometry. `_make_vector_artifact(path)` reads the bounds via fiona. The existing `_write_vector` already infers geometry type from the first geometry (`geom_type = "Point"` when the first geom is a Point, else "Polygon" — check the helper's existing branching). If `_write_vector` already supports Point, you do not need a parallel helper; just pass Point geometries. If it only handles Point/Polygon, you may need to extend it OR add a small parallel helper for LineString and MultiPolygon. Verify by READING the helper before deciding.
+- Lane: operator (text + tests) + check (paired tests). One logical commit.
+- HARD BOUNDARY: only `packages/quarry-operators/src/quarry_operators/rasterize_vector.py` AND `tests/pressure_test/test_rasterize_vector.py` may be MODIFIED. No other files. dgov diffs the final commit; any line change outside these two is a contract violation. The settlement gate runs the full pressure suite — trust it; do NOT run pytest yourself.
+
+Edit:
+1. In `packages/quarry-operators/src/quarry_operators/rasterize_vector.py`, update only the doctext (no logic changes):
+   a. Module docstring line "Accepts: one vector artifact (polygons)" -> "Accepts: one vector artifact (Point, LineString, Polygon, or Multi variants)".
+   b. `RasterizeVectorOperator` class docstring "Burn vector polygon geometries into a raster grid." -> "Burn vector geometries (Point, LineString, Polygon, or Multi variants) into a raster grid."
+   c. Class docstring "Input 0: vector artifact (polygon geometries)" -> "Input 0: vector artifact (any GeoJSON geometry type supported by rasterio.features.rasterize)".
+   d. Replace any remaining "polygon"-specific phrasing in the class docstring with geometry-neutral language (e.g., "Each pixel covered by a polygon" -> "Each pixel covered by a geometry"). Keep wording minimal; do not restructure the docstring.
+   e. Do NOT touch `_rasterize_single_band`, `_rasterize_multi_band`, `validate_inputs`, `OperatorSpec`, `RasterizeVectorParams`, `_run_checks`, `declared_checks`, or `execute` body. The minimal change is purely textual.
+   f. If during your read you discover a hidden geometry-type check that the orient summary above missed, relax it (do not delete unrelated branches) and note it in the commit message.
+2. In `tests/pressure_test/test_rasterize_vector.py`:
+   a. If the existing `_write_vector` helper does not support LineString/MultiPolygon (CHECK FIRST), add a small parallel helper `_write_features(path, geometries, geometry_type, crs_epsg=32610, properties=None)` placed immediately after `_write_vector`. The helper takes an explicit `geometry_type` schema string ("LineString", "Point", "MultiPolygon"), opens fiona with that schema, and writes each geometry. Reuse `_make_vector_artifact` unchanged.
+   b. Extend the existing shapely import line to include `LineString`, `MultiPolygon`, and `Point` if not already present. Keep alphabetical order within the import.
+   c. Add three new pressure tests at the end of the file, mirroring the style of existing tests:
+      - `test_rasterize_linestring`: Build a LineString from (0.5, 0.5) to (3.5, 3.5). Write via `_write_features(..., geometry_type="LineString")`. Rasterize at `resolution=(1.0, 1.0)`, `extent=(0,0,4,4)`, `burn_value=5.0`, `nodata=0.0`, `all_touched=True` (lines need it to register). Assert: `result.artifact.metadata["shapes_burned"] == 1`; data has at least one pixel == 5.0; data has at least one pixel == 0.0.
+      - `test_rasterize_point`: Build a single shapely Point at (1.5, 1.5). Write via `_write_features(..., geometry_type="Point")`. Rasterize at `resolution=(1.0, 1.0)`, `extent=(0,0,4,4)`, `burn_value=7.0`, `nodata=0.0`. Assert: `shapes_burned == 1`; exactly one pixel equals 7.0 (`np.sum(data == 7.0) == 1`); all other pixels are 0.0.
+      - `test_rasterize_multipolygon`: Build a shapely MultiPolygon from two disjoint unit squares at `(0,0)-(1,1)` and `(3,3)-(4,4)`. Write via `_write_features(..., geometry_type="MultiPolygon")`. Rasterize at `resolution=(1.0, 1.0)`, `extent=(0,0,4,4)`, `burn_value=9.0`, `nodata=0.0`. Assert: `shapes_burned == 1` (one MultiPolygon feature); `np.sum(data == 9.0) >= 2` (both component polygons burned); `np.any(data == 0.0)` (background present).
+   d. Update the module docstring stress-points list to add the new cases (continuing the existing numbered pattern).
+3. Worker constraints (strict):
+   - Do NOT change the existing polygon behavior. The 28+ existing tests must keep passing without edits.
+   - Do NOT change `RasterizeVectorParams` fields, defaults, or types.
+   - Do NOT change `validate_inputs` signature, return type, or any error message it currently produces.
+   - Do NOT change `OperatorSpec`, `declared_checks`, `_run_checks`, or any helper signature beyond what is strictly required to accept additional geometry types (which, per orient, is nothing — the helpers already accept any geometry).
+   - Do NOT introduce numpy/shapely/rasterio API calls beyond what already appears in the file.
+   - Do NOT add a `geometry_type` parameter to `RasterizeVectorParams`.
+   - Do NOT modify `_make_vector_artifact` in the test file.
+
+Verify:
+- `uv run ruff check packages/quarry-operators/src/quarry_operators/rasterize_vector.py tests/pressure_test/test_rasterize_vector.py`
+- `uv run ruff format --check packages/quarry-operators/src/quarry_operators/rasterize_vector.py tests/pressure_test/test_rasterize_vector.py`
+- Syntax check: `uv run python -c "import ast; ast.parse(open('packages/quarry-operators/src/quarry_operators/rasterize_vector.py').read()); ast.parse(open('tests/pressure_test/test_rasterize_vector.py').read()); print('ok')"`
+- The settlement gate runs the full pressure suite — trust it; do NOT run pytest yourself.
+"""
+commit_message = "quarry-operators: rasterize line/point/multipolygon geometries"
+self_review = true
+
+files.edit = [
+  "packages/quarry-operators/src/quarry_operators/rasterize_vector.py",
+  "tests/pressure_test/test_rasterize_vector.py",
+]

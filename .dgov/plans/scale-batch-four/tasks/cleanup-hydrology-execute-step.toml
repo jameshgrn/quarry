@@ -1,0 +1,38 @@
+[tasks.cleanup-hydrology-execute-step]
+summary = "Resolve mixed contract on HydrologyFlow._execute_step — return only RunRecord; callers derive checks from run_record.checks. Pure refactor — no behavior change."
+prompt = """
+Orient:
+- Read `packages/quarry-operators/src/quarry_operators/hydrology_flow.py` end-to-end. The private method `HydrologyFlow._execute_step` (around line 278) currently returns `tuple[RunRecord, list[CheckResult]]` AND has a registry-persistence side effect (`self._registry.save_run(run_record)`). The returned `step_checks` is just `list(run_record.checks)` — redundant with what the caller already has via the returned `RunRecord`. AGENTS.md scheduled debt entry calls this out: "`HydrologyFlow._execute_step` mutates input lists AND returns a value — mixed contract, single caller, low urgency".
+- Single caller: `HydrologyFlow.run()` invokes `_execute_step` exactly three times (fill_depressions, d8_flow_direction, flow_accumulation). Each call site immediately does `runs.append(run_record)` and `all_checks.extend(step_checks)`. The registry side effect must remain — that is the whole point of the helper.
+- Chosen direction: PURE-RETURN of just `RunRecord`. This is the smaller change because (a) the second tuple element is trivially recoverable from `run_record.checks` and (b) callers already destructure the tuple, so we drop one element instead of restructuring control flow. The registry persistence stays inside `_execute_step` — it is a contained internal effect, not part of the "mixed contract" being resolved.
+- Lane: flow (contract cleanup). One logical commit.
+- Doctrine: this is a contract refactor. The PUBLIC behavior of `HydrologyFlow.run()` must remain byte-identical — same `HydrologyFlowResult`, same artifacts, same `runs` list contents and order, same `all_checks` list contents and order, same registry writes, same lineage. The existing pressure tests in `tests/pressure_test/test_hydrology_flow.py` must keep passing without modification.
+- HARD BOUNDARY: only `packages/quarry-operators/src/quarry_operators/hydrology_flow.py` may be MODIFIED. The test file `tests/pressure_test/test_hydrology_flow.py` is in `files.read` ONLY — do not open for editing, do not modify, do not delete. dgov diffs the final commit; any line change in a read-only file is a contract violation. The settlement gate runs the full pressure suite — trust it; do NOT run pytest yourself.
+
+Edit:
+1. In `packages/quarry-operators/src/quarry_operators/hydrology_flow.py`, change `HydrologyFlow._execute_step` to return only `RunRecord` (not a tuple). Update the signature to `-> RunRecord`. Drop the local `step_checks = list(run_record.checks)` line and the tuple return; the body becomes: submit, save_run if registry, return run_record. Keep the registry persistence behavior identical (`if self._registry is not None: self._registry.save_run(run_record)`).
+2. Update the docstring on `_execute_step` to reflect the single contract: it submits one step, persists the run when a registry is configured, and returns the resulting `RunRecord`. Remove the "Tuple of (RunRecord, list of CheckResult ...)" wording. The note that "Failure is represented as status=FAILED in the RunRecord" should remain.
+3. Remove the now-unused `CheckResult` import only if no other reference to `CheckResult` remains in the module — `HydrologyFlowSuccess.all_checks: list[CheckResult]` and `HydrologyFlowFailure.all_checks: list[CheckResult]` still reference it, so the import MUST stay. Do not remove it.
+4. Update each of the three call sites in `HydrologyFlow.run()` (fill_depressions, d8_flow_direction, flow_accumulation). Replace:
+       run_record, step_checks = self._execute_step(...)
+       runs.append(run_record)
+       all_checks.extend(step_checks)
+   with:
+       run_record = self._execute_step(...)
+       runs.append(run_record)
+       all_checks.extend(run_record.checks)
+   Use `run_record.checks` directly in `extend(...)` — `list.extend` accepts any iterable, so the explicit `list(...)` wrapper from the old helper is unnecessary at the caller. The resulting `all_checks` list contents and order are byte-identical: `list.extend(iterable)` appends each element in order, identical to extending from `list(iterable)`.
+5. Do NOT change: the `run()` method signature, `HydrologyFlowParams`, `HydrologyFlowSuccess`, `HydrologyFlowFailure`, `HydrologyFlowResult`, the order of registry writes, the order in which `runs` and `all_checks` are populated, the failure-branch construction (each `HydrologyFlowFailure(...)` keeps the same fields and the same partial artifacts), the input-artifact `save_artifact` call, or any imports required by the dataclasses.
+6. Do NOT introduce a third state (do not keep the tuple AND a side effect on a list parameter, do not pass `runs`/`all_checks` into `_execute_step`, do not add a new helper). Do NOT add new validation, new fields, new params, new checks, vectorization, or any "while you're here" cleanup. The existing pressure tests in `tests/pressure_test/test_hydrology_flow.py` must pass without modification.
+
+Verify:
+- `uv run ruff check packages/quarry-operators/src/quarry_operators/hydrology_flow.py`
+- `uv run ruff format --check packages/quarry-operators/src/quarry_operators/hydrology_flow.py`
+- Quick syntax / import sanity: `uv run python -c "from quarry_operators.hydrology_flow import HydrologyFlow, HydrologyFlowParams, HydrologyFlowSuccess, HydrologyFlowFailure, HydrologyFlowResult; print('ok')"`
+- The settlement gate runs the full pressure suite — trust it; do NOT run pytest yourself.
+"""
+commit_message = "quarry-operators: simplify HydrologyFlow._execute_step contract"
+self_review = true
+
+files.edit = ["packages/quarry-operators/src/quarry_operators/hydrology_flow.py"]
+files.read = ["tests/pressure_test/test_hydrology_flow.py"]
