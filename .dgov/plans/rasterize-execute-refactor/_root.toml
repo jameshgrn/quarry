@@ -1,4 +1,0 @@
-[plan]
-name = "rasterize-execute-refactor"
-summary = "Split RasterizeVectorOperator.execute (220 lines) into single-band and multi-band rasterization helpers; pure refactor, no behavioral change."
-sections = ["tasks"]
