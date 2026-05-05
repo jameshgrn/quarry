@@ -146,6 +146,154 @@ def _decode_arcs(
     return coords
 
 
+def _decode_ring(
+    ring_indices: list[int], arcs: list[list[list[float]]], transform: dict[str, Any] | None = None
+) -> list[list[float]] | None:
+    """Decode a single polygon ring from arc indices.
+
+    Args:
+        ring_indices: List of arc indices for this ring
+        arcs: The arcs array from the TopoJSON
+        transform: Optional transform dict
+
+    Returns:
+        Closed ring coordinates or None if invalid (needs at least 4 points)
+    """
+    coords = _decode_arcs(ring_indices, arcs, transform)
+    # Close the ring if needed
+    if coords and coords[0] != coords[-1]:
+        coords.append(coords[0])
+    if len(coords) >= 4:  # Need at least 4 points for a valid ring
+        return coords
+    return None
+
+
+def _point_geom_to_geojson(geom: dict[str, Any]) -> dict[str, Any] | None:
+    """Convert Point or MultiPoint geometry to GeoJSON format.
+
+    Args:
+        geom: TopoJSON geometry dict with Point or MultiPoint type
+
+    Returns:
+        GeoJSON geometry dict or None if empty
+    """
+    geom_type = geom.get("type")
+    coords = geom.get("coordinates")
+    if coords:
+        return {"type": geom_type, "coordinates": coords}
+    return None
+
+
+def _line_geom_to_geojson(
+    geom: dict[str, Any], arcs: list[list[list[float]]], transform: dict[str, Any] | None = None
+) -> dict[str, Any] | None:
+    """Convert LineString or MultiLineString geometry to GeoJSON format.
+
+    Args:
+        geom: TopoJSON geometry dict with LineString or MultiLineString type
+        arcs: The arcs array from the TopoJSON
+        transform: Optional transform dict
+
+    Returns:
+        GeoJSON geometry dict or None if empty
+    """
+    geom_type = geom.get("type")
+
+    if geom_type == "LineString":
+        arc_indices = geom.get("arcs", [])
+        if not arc_indices:
+            return None
+        coords = _decode_arcs(arc_indices, arcs, transform)
+        if len(coords) < 2:
+            return None
+        return {"type": "LineString", "coordinates": coords}
+
+    # MultiLineString
+    arc_sets = geom.get("arcs", [])
+    if not arc_sets:
+        return None
+    lines: list[list[list[float]]] = []
+    for arc_indices in arc_sets:
+        coords = _decode_arcs(arc_indices, arcs, transform)
+        if len(coords) >= 2:
+            lines.append(coords)
+    if not lines:
+        return None
+    return {"type": "MultiLineString", "coordinates": lines}
+
+
+def _polygon_geom_to_geojson(
+    geom: dict[str, Any], arcs: list[list[list[float]]], transform: dict[str, Any] | None = None
+) -> dict[str, Any] | None:
+    """Convert Polygon or MultiPolygon geometry to GeoJSON format.
+
+    Args:
+        geom: TopoJSON geometry dict with Polygon or MultiPolygon type
+        arcs: The arcs array from the TopoJSON
+        transform: Optional transform dict
+
+    Returns:
+        GeoJSON geometry dict or None if empty
+    """
+    geom_type = geom.get("type")
+
+    if geom_type == "Polygon":
+        rings = geom.get("arcs", [])
+        if not rings:
+            return None
+        geojson_rings: list[list[list[float]]] = []
+        for ring_indices in rings:
+            ring_coords = _decode_ring(ring_indices, arcs, transform)
+            if ring_coords is not None:
+                geojson_rings.append(ring_coords)
+        if not geojson_rings:
+            return None
+        return {"type": "Polygon", "coordinates": geojson_rings}
+
+    # MultiPolygon
+    polygon_sets = geom.get("arcs", [])
+    if not polygon_sets:
+        return None
+    polygons: list[list[list[list[float]]]] = []
+    for rings in polygon_sets:
+        geojson_rings: list[list[list[float]]] = []
+        for ring_indices in rings:
+            ring_coords = _decode_ring(ring_indices, arcs, transform)
+            if ring_coords is not None:
+                geojson_rings.append(ring_coords)
+        if geojson_rings:
+            polygons.append(geojson_rings)
+    if not polygons:
+        return None
+    return {"type": "MultiPolygon", "coordinates": polygons}
+
+
+def _collection_geom_to_geojson(
+    geom: dict[str, Any], arcs: list[list[list[float]]], transform: dict[str, Any] | None = None
+) -> dict[str, Any] | None:
+    """Convert GeometryCollection to GeoJSON format.
+
+    Args:
+        geom: TopoJSON geometry dict with GeometryCollection type
+        arcs: The arcs array from the TopoJSON
+        transform: Optional transform dict
+
+    Returns:
+        GeoJSON geometry dict or None if empty
+    """
+    geometries = geom.get("geometries", [])
+    if not geometries:
+        return None
+    geojson_geoms: list[dict[str, Any]] = []
+    for g in geometries:
+        geojson_g = _geometry_to_geojson(g, arcs, transform)
+        if geojson_g:
+            geojson_geoms.append(geojson_g)
+    if not geojson_geoms:
+        return None
+    return {"type": "GeometryCollection", "geometries": geojson_geoms}
+
+
 def _geometry_to_geojson(
     geom: dict[str, Any], arcs: list[list[list[float]]], transform: dict[str, Any] | None = None
 ) -> dict[str, Any] | None:
@@ -161,88 +309,17 @@ def _geometry_to_geojson(
     """
     geom_type = geom.get("type")
 
-    if geom_type == "Point":
-        coords = geom.get("coordinates")
-        if coords:
-            return {"type": "Point", "coordinates": coords}
-        return None
+    if geom_type in ("Point", "MultiPoint"):
+        return _point_geom_to_geojson(geom)
 
-    if geom_type == "MultiPoint":
-        coords = geom.get("coordinates")
-        if coords:
-            return {"type": "MultiPoint", "coordinates": coords}
-        return None
+    if geom_type in ("LineString", "MultiLineString"):
+        return _line_geom_to_geojson(geom, arcs, transform)
 
-    if geom_type == "LineString":
-        arc_indices = geom.get("arcs", [])
-        if not arc_indices:
-            return None
-        coords = _decode_arcs(arc_indices, arcs, transform)
-        if len(coords) < 2:
-            return None
-        return {"type": "LineString", "coordinates": coords}
-
-    if geom_type == "MultiLineString":
-        arc_sets = geom.get("arcs", [])
-        if not arc_sets:
-            return None
-        lines: list[list[list[float]]] = []
-        for arc_indices in arc_sets:
-            coords = _decode_arcs(arc_indices, arcs, transform)
-            if len(coords) >= 2:
-                lines.append(coords)
-        if not lines:
-            return None
-        return {"type": "MultiLineString", "coordinates": lines}
-
-    if geom_type == "Polygon":
-        rings = geom.get("arcs", [])
-        if not rings:
-            return None
-        geojson_rings: list[list[list[float]]] = []
-        for ring_indices in rings:
-            coords = _decode_arcs(ring_indices, arcs, transform)
-            # Close the ring if needed
-            if coords and coords[0] != coords[-1]:
-                coords.append(coords[0])
-            if len(coords) >= 4:  # Need at least 4 points for a valid ring
-                geojson_rings.append(coords)
-        if not geojson_rings:
-            return None
-        return {"type": "Polygon", "coordinates": geojson_rings}
-
-    if geom_type == "MultiPolygon":
-        polygon_sets = geom.get("arcs", [])
-        if not polygon_sets:
-            return None
-        polygons: list[list[list[list[float]]]] = []
-        for rings in polygon_sets:
-            geojson_rings: list[list[list[float]]] = []
-            for ring_indices in rings:
-                coords = _decode_arcs(ring_indices, arcs, transform)
-                # Close the ring if needed
-                if coords and coords[0] != coords[-1]:
-                    coords.append(coords[0])
-                if len(coords) >= 4:
-                    geojson_rings.append(coords)
-            if geojson_rings:
-                polygons.append(geojson_rings)
-        if not polygons:
-            return None
-        return {"type": "MultiPolygon", "coordinates": polygons}
+    if geom_type in ("Polygon", "MultiPolygon"):
+        return _polygon_geom_to_geojson(geom, arcs, transform)
 
     if geom_type == "GeometryCollection":
-        geometries = geom.get("geometries", [])
-        if not geometries:
-            return None
-        geojson_geoms: list[dict[str, Any]] = []
-        for g in geometries:
-            geojson_g = _geometry_to_geojson(g, arcs, transform)
-            if geojson_g:
-                geojson_geoms.append(geojson_g)
-        if not geojson_geoms:
-            return None
-        return {"type": "GeometryCollection", "geometries": geojson_geoms}
+        return _collection_geom_to_geojson(geom, arcs, transform)
 
     return None
 
