@@ -201,14 +201,14 @@ class HydrologyFlow:
             apply_gradient=params.apply_gradient,
             epsilon=params.epsilon,
         )
-        run_record, step_checks = self._execute_step(
+        run_record = self._execute_step(
             operator=FillDepressionsOperator(),
             inputs=[dem_artifact],
             params=fill_params,
             step_name="fill_depressions",
         )
         runs.append(run_record)
-        all_checks.extend(step_checks)
+        all_checks.extend(run_record.checks)
         if run_record.status != RunStatus.COMPLETED:
             # Step failed
             return HydrologyFlowFailure(
@@ -224,14 +224,14 @@ class HydrologyFlow:
             output_path=str(workspace / "flow_direction.tif"),
             nodata=params.nodata,
         )
-        run_record, step_checks = self._execute_step(
+        run_record = self._execute_step(
             operator=D8FlowDirectionOperator(),
             inputs=[filled_dem],
             params=d8_params,
             step_name="d8_flow_direction",
         )
         runs.append(run_record)
-        all_checks.extend(step_checks)
+        all_checks.extend(run_record.checks)
         if run_record.status != RunStatus.COMPLETED:
             return HydrologyFlowFailure(
                 failed_step="d8_flow_direction",
@@ -247,14 +247,14 @@ class HydrologyFlow:
             output_path=str(workspace / "flow_accumulation.tif"),
             weight=params.weight,
         )
-        run_record, step_checks = self._execute_step(
+        run_record = self._execute_step(
             operator=FlowAccumulationOperator(),
             inputs=[flow_direction],
             params=acc_params,
             step_name="flow_accumulation",
         )
         runs.append(run_record)
-        all_checks.extend(step_checks)
+        all_checks.extend(run_record.checks)
         if run_record.status != RunStatus.COMPLETED:
             return HydrologyFlowFailure(
                 failed_step="flow_accumulation",
@@ -281,7 +281,7 @@ class HydrologyFlow:
         inputs: Sequence[Artifact],
         params: OperatorParams,
         step_name: str,
-    ) -> tuple[RunRecord, list[CheckResult]]:
+    ) -> RunRecord:
         """Execute one step and persist to registry.
 
         Args:
@@ -291,15 +291,13 @@ class HydrologyFlow:
             step_name: Name of the step for error reporting
 
         Returns:
-            Tuple of (RunRecord, list of CheckResult from this step).
-            Caller is responsible for accumulating runs and checks.
-            Failure is represented as status=FAILED in the RunRecord.
+            RunRecord from this step. The caller can access checks via
+            run_record.checks. Failure is represented as status=FAILED.
         """
         run_record = self._executor.submit(operator, list(inputs), params)
-        step_checks = list(run_record.checks)
 
         # Persist every attempted run. Failed runs are still real runs.
         if self._registry is not None:
             self._registry.save_run(run_record)
 
-        return run_record, step_checks
+        return run_record
