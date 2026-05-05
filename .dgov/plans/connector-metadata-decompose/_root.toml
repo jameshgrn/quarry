@@ -1,4 +1,0 @@
-[plan]
-name = "connector-metadata-decompose"
-summary = "Decompose three top sentrux complex-function offenders (excel/csv metadata readers, spatial-join execute) into named helpers. Pure refactors, parallel-safe, no behavior change."
-sections = ["tasks"]
