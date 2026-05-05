@@ -1,0 +1,30 @@
+[tasks.decompose-csv-metadata]
+summary = "Decompose _read_csv_metadata in csv_xy.py into 3 named module-level helpers. Pure refactor — no behavior change."
+prompt = """
+Orient:
+- Read `packages/quarry-connectors/src/quarry_connectors/csv_xy.py` end-to-end. The module-level `_read_csv_metadata(file_path, delimiter, explicit_lon_col, explicit_lat_col)` function starts at line 140 and is 128 lines, cyclomatic 26, cognitive 52 per Sentrux — the top long-function offender in this connector.
+- Lane: connector (refactor only). One logical commit.
+- Doctrine: this is a strict refactor. No public behavior change. The existing pressure tests in `tests/pressure_test/test_csv_xy_connector.py` must keep passing without modification. The function is consumed internally by `CSVXYConnector.materialize`, `CSVXYConnector.discover`, and `CSVXYConnector.metadata` — all callers must continue to receive the exact same dict shape and key set.
+- HARD BOUNDARY: only `packages/quarry-connectors/src/quarry_connectors/csv_xy.py` may be MODIFIED. The test file `tests/pressure_test/test_csv_xy_connector.py` is in `files.read` ONLY — it must remain byte-identical to HEAD. Do not open for editing, do not modify, do not delete. dgov diffs the final commit; any line change in a read-only file is a contract violation. The settlement gate runs the full pressure suite — trust it; do NOT run pytest yourself.
+
+Edit:
+1. In `packages/quarry-connectors/src/quarry_connectors/csv_xy.py`, refactor `_read_csv_metadata(...)` so its body becomes orchestration only. Extract these private module-level helpers, placed BEFORE `_read_csv_metadata` (after `_is_numeric` is fine):
+   a. `_resolve_coordinate_columns(headers: list[str], explicit_lon_col: str | None, explicit_lat_col: str | None, file_path: Path) -> tuple[str | None, str | None, str | None]` — returns `(lon_col, lat_col, crs_hint)`. Encapsulates the auto-detect vs explicit-column branch (lines 193-217 of the current function), including the `MaterializeError` raises when an explicit column is missing from headers and the explicit-name CRS inference via `_normalize_column`.
+   b. `_scan_coordinate_rows(reader: "csv.reader", lon_idx: int, lat_idx: int) -> tuple[int, int, tuple[float, float, float, float] | None]` — consumes the remaining reader rows, returns `(row_count, valid_feature_count, extent)`. Encapsulates the per-row malformed-row skip, `_is_numeric` gate, float parse, and final extent computation from collected x/y values (lines 225-242 plus the extent calc at lines 254-255).
+   c. `_count_table_rows(reader: "csv.reader") -> int` — consumes the reader and returns row_count for the no-coordinates branch (lines 245-246).
+2. After extraction, `_read_csv_metadata` reads as: existence/empty check, delimiter detection, open file, read header, call `_resolve_coordinate_columns`, branch on `has_coordinates`, call `_scan_coordinate_rows` or `_count_table_rows`, assemble and return the result dict. The outer try/except wrapping `csv.Error` and `UnicodeDecodeError` must remain in `_read_csv_metadata` so error wrapping behavior is preserved byte-for-byte for callers.
+3. Helper placement: module-level private functions, type hints required. Use `from __future__ import annotations` (already present) and quote `csv.reader` in annotations if needed.
+4. Do NOT change: the public signature of `_read_csv_metadata`, the returned dict's keys or value semantics, the order of error checks, the `MaterializeError` messages, or any other module-level symbol (`_normalize_column`, `_detect_coordinate_columns`, `_detect_delimiter`, `_parse_source_ref`, `_is_numeric`, `_write_geopackage`, `CSVXYConnector`).
+5. Do NOT add new validation, new dict keys, new dataclass fields, or any "while you're here" cleanup. Do not refactor `_write_geopackage` or any connector method.
+
+Verify:
+- `uv run ruff check packages/quarry-connectors/src/quarry_connectors/csv_xy.py`
+- `uv run ruff format --check packages/quarry-connectors/src/quarry_connectors/csv_xy.py`
+- Quick syntax check: `uv run python -c "from quarry_connectors.csv_xy import _read_csv_metadata, _resolve_coordinate_columns, _scan_coordinate_rows, _count_table_rows; print('ok')"`
+- The settlement gate runs the full pressure suite — trust it; do NOT run pytest yourself.
+"""
+commit_message = "quarry-connectors: extract csv metadata helpers"
+self_review = true
+
+files.edit = ["packages/quarry-connectors/src/quarry_connectors/csv_xy.py"]
+files.read = ["tests/pressure_test/test_csv_xy_connector.py"]

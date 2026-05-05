@@ -1,0 +1,33 @@
+[tasks.decompose-spatial-join-execute]
+summary = "Decompose SpatialJoinOperator.execute into named phase helpers (load right, build merged schema, run join loop). Pure refactor — no behavior change."
+prompt = """
+Orient:
+- Read `packages/quarry-operators/src/quarry_operators/spatial_join.py` end-to-end. The `execute` method begins at line 112 and is 172 lines, cyclomatic 25, cognitive 69 per Sentrux — the top long-function offender in this module.
+- Phases inside `execute` are well-defined: (a) param/type guard, (b) read right features into memory, (c) read left schema/CRS/geom-type, (d) resolve schema collisions and build the merged output schema + null-right template, (e) per-left-feature join loop with prepared-geometry predicate dispatch and GeoJSON write, (f) read-back fresh metadata, (g) artifact assembly + checks.
+- Lane: operator (refactor only). One logical commit.
+- Doctrine: this is a strict refactor. No public behavior change. The 24 existing pressure tests in `tests/pressure_test/test_spatial_join.py` (including the recent contains/within/touches/asymmetry predicate tests) must keep passing without modification.
+- HARD BOUNDARY: only `packages/quarry-operators/src/quarry_operators/spatial_join.py` may be MODIFIED. The test file `tests/pressure_test/test_spatial_join.py` is in `files.read` ONLY — do not open for editing, do not modify, do not delete. dgov diffs the final commit; any line change in a read-only file is a contract violation. The settlement gate runs the full pressure suite — trust it; do NOT run pytest yourself.
+
+Edit:
+1. In `packages/quarry-operators/src/quarry_operators/spatial_join.py`, refactor `SpatialJoinOperator.execute` so its body becomes orchestration only. Extract the following private module-level helpers, placed AFTER `_SUPPORTED_PREDICATES` and BEFORE the `SpatialJoinOperator` class. Module-level private functions are the convention from the rasterize_vector and d8_flow_direction refactors — follow that convention here. Type hints required on all helpers.
+   a. `_load_right_features(uri: str) -> tuple[list[tuple[object, dict]], dict[str, str]]` — open the right vector with fiona, build the in-memory `(shapely_geom_or_None, props_dict)` list, and return `(right_features, right_schema_props)`. Uses `from shapely.geometry import shape` inside.
+   b. `_build_merged_schema(left_schema_props: dict[str, str], right_schema_props: dict[str, str], left_geom_type: str) -> tuple[dict, dict[str, str], dict[str, None]]` — apply the `_right` suffix collision rule and return `(out_schema, collision_renames, null_right_template)`. Preserve the existing rename pattern exactly: `new_key = f"{rkey}_right"` only when `rkey in merged_schema_props`.
+   c. `_run_join_loop(left_uri: str, output_path: Path, out_schema: dict, left_crs: object, right_features: list[tuple[object, dict]], collision_renames: dict[str, str], null_right: dict[str, None], predicate: str) -> tuple[int, int]` — open left + open output writer, iterate left features, build the prepared geometry, dispatch via `getattr(prepared, predicate)(right_geom)` EXACTLY as today, emit one row with null right attrs when no matches OR one row per match (with renamed right keys merged over `null_right`), and return `(left_feature_count, output_feature_count)`. Imports `fiona`, `shape`, `prep` inside.
+2. After extraction, the body of `execute` reads as: param guard, mkdir, `try:` block that calls `_load_right_features` then opens the left file briefly to capture `left_schema_props`/`left_crs`/`left_geom_type` then calls `_build_merged_schema` then calls `_run_join_loop`, `except OperatorError: raise / except Exception` wrap unchanged, fresh-metadata read-back unchanged, artifact assembly unchanged, `_run_checks` call unchanged, `OperatorResult` return unchanged.
+3. Preserve EXACTLY: `_SUPPORTED_PREDICATES`, the predicate dispatch via `getattr(prepared, params.predicate)(right_geom)`, the schema collision rename pattern (`_right` suffix), left-join semantics (every left feature emitted at least once — once with nulls when no matches, once per match otherwise), the `Lineage.params` payload (`predicate` + `collision_renames`), the `metadata` keys on the output Artifact, and the `_run_checks` arguments.
+4. Do NOT change: the public `execute` signature, the `validate_inputs` method, `SpatialJoinParams`, `SpatialJoinOperator.spec`, `_run_checks`, `declared_checks`, the module docstring, or any other module-level symbol.
+5. Do NOT add: new validation, new params fields, new checks, new imports beyond what the helpers need, or any "while you're here" cleanup.
+
+Worker constraints: Do NOT change the public method signature, the algorithm, the predicate dispatch via `getattr(prepared, params.predicate)`, the schema collision rename pattern (`_right` suffix), the left-join semantics (every left feature emitted at least once), or any caller-visible behavior. Do NOT add new validation, params fields, or any "while you're here" cleanup. The existing 24 pressure tests in `tests/pressure_test/test_spatial_join.py` must pass without modification.
+
+Verify:
+- `uv run ruff check packages/quarry-operators/src/quarry_operators/spatial_join.py`
+- `uv run ruff format --check packages/quarry-operators/src/quarry_operators/spatial_join.py`
+- Quick syntax check: `uv run python -c "from quarry_operators.spatial_join import SpatialJoinOperator, SpatialJoinParams, _load_right_features, _build_merged_schema, _run_join_loop; print('ok')"`
+- The settlement gate runs the full pressure suite — trust it; do NOT run pytest yourself.
+"""
+commit_message = "quarry-operators: extract spatial join execute helpers"
+self_review = true
+
+files.edit = ["packages/quarry-operators/src/quarry_operators/spatial_join.py"]
+files.read = ["tests/pressure_test/test_spatial_join.py"]
