@@ -60,6 +60,156 @@ class HillshadeParams(OperatorParams):
     scaled: bool = False
 
 
+def _read_dem(
+    input_path: str,
+    op_name: str,
+    artifact_id: str,
+    params_nodata: float | None,
+) -> tuple[np.ndarray, float | None, dict, object]:
+    """Open raster, enforce single-band, return DEM and metadata.
+
+    Returns:
+        Tuple of (dem_float64, resolved_nodata, meta_copy, transform)
+    """
+    import rasterio
+
+    with rasterio.open(input_path) as src:
+        if src.count != 1:
+            raise OperatorError(
+                op_name,
+                f"DEM must be single-band, got {src.count} bands",
+                inputs=[artifact_id],
+            )
+        dem = src.read(1).astype(np.float64)
+        nodata = params_nodata if params_nodata is not None else src.nodata
+        meta = src.meta.copy()
+        transform = src.transform
+    return dem, nodata, meta, transform
+
+
+def _compute_slope_aspect(
+    dem: np.ndarray,
+    valid: np.ndarray,
+    cell_width: float,
+    cell_height: float,
+    z_factor: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Compute slope and aspect from DEM using central differences.
+
+    Returns:
+        Tuple of (slope_rad, aspect_rad)
+    """
+    # Mask nodata cells to NaN before scaling so gradient computation
+    # produces NaN (caught later) instead of wrong values from scaled nodata
+    dem_work = dem.copy()
+    dem_work[~valid] = np.nan
+    dem_scaled = dem_work * z_factor
+
+    # Calculate gradients using central differences
+    nrows, ncols = dem_scaled.shape
+    if nrows == 1:
+        dz_dx = np.gradient(dem_scaled, cell_width, axis=1)
+        dz_dy = np.zeros_like(dem_scaled)
+    elif ncols == 1:
+        dz_dy = np.gradient(dem_scaled, cell_height, axis=0)
+        dz_dx = np.zeros_like(dem_scaled)
+    else:
+        dz_dy, dz_dx = np.gradient(dem_scaled, cell_height, cell_width)
+
+    # Compute slope in radians
+    # tan(slope) = sqrt(dz_dx^2 + dz_dy^2)
+    slope_rad = np.arctan(np.sqrt(dz_dx**2 + dz_dy**2))
+
+    # Compute aspect (downslope direction) in radians (math convention: 0=E, CCW)
+    # dz_dy is d(z)/d(row) = d(z)/d(south), so the north component of
+    # the downslope vector is dz_dy (not -dz_dy).
+    # East component of downslope = -dz_dx.
+    aspect_rad = np.arctan2(dz_dy, -dz_dx)
+
+    return slope_rad, aspect_rad
+
+
+def _compute_illumination(
+    slope_rad: np.ndarray,
+    aspect_rad: np.ndarray,
+    valid: np.ndarray,
+    azimuth_deg: float,
+    altitude_deg: float,
+    output_nodata: float,
+) -> np.ndarray:
+    """Apply Horn (1981) hillshade formula to compute illumination.
+
+    Returns:
+        Illumination array with nodata applied
+    """
+    # Convert sun angles
+    # Zenith angle: π/2 - altitude (altitude is elevation above horizon)
+    zenith_rad = np.pi / 2 - np.radians(altitude_deg)
+
+    # Convert azimuth from compass to math convention
+    # Compass: 0=N, 90=E, 180=S, 270=W (clockwise from N)
+    # Math: 0=E, 90=N, 180=W, 270=S (counter-clockwise from E)
+    # Conversion: math_azimuth = 90 - compass_azimuth
+    azimuth_math_rad = np.radians(90.0 - azimuth_deg)
+
+    # Horn (1981) hillshade formula
+    # illumination = cos(zenith) * cos(slope) +
+    #                sin(zenith) * sin(slope) * cos(azimuth - aspect)
+    illumination = np.cos(zenith_rad) * np.cos(slope_rad) + np.sin(zenith_rad) * np.sin(
+        slope_rad
+    ) * np.cos(azimuth_math_rad - aspect_rad)
+
+    # Clip to valid range [0, 1]
+    illumination = np.clip(illumination, 0.0, 1.0)
+
+    # Apply nodata mask — also catch NaN leaked by gradient near nodata cells
+    nan_mask = np.isnan(illumination)
+    illumination[~valid | nan_mask] = output_nodata
+
+    return illumination
+
+
+def _write_hillshade(
+    illumination: np.ndarray,
+    output_path: Path,
+    meta: dict,
+    scaled: bool,
+    output_nodata: float,
+) -> tuple[np.ndarray, str, float | int]:
+    """Write hillshade raster to output path.
+
+    Returns:
+        Tuple of (hillshade_array, out_dtype, out_nodata)
+    """
+    import rasterio
+
+    # Prepare output based on scaled parameter
+    if scaled:
+        # Output as float64 in range [0.0, 1.0]
+        hillshade = illumination
+        out_dtype = "float64"
+        out_nodata = output_nodata
+    else:
+        # Output as uint8 in range [0, 255]
+        hillshade = (illumination * 255).astype(np.uint8)
+        out_dtype = "uint8"
+        out_nodata = int(output_nodata)
+
+    # Update metadata for output
+    meta.update(
+        {
+            "dtype": out_dtype,
+            "nodata": out_nodata,
+        }
+    )
+
+    # Write output
+    with rasterio.open(output_path, "w", **meta) as dst:
+        dst.write(hillshade, 1)
+
+    return hillshade, out_dtype, out_nodata
+
+
 class HillshadeOperator:
     """Compute hillshade (shaded relief) from a DEM.
 
@@ -150,18 +300,13 @@ class HillshadeOperator:
         nodata: float | None = None
 
         try:
-            with rasterio.open(input_path) as src:
-                if src.count != 1:
-                    raise OperatorError(
-                        self.name,
-                        f"DEM must be single-band, got {src.count} bands",
-                        inputs=[artifact.id],
-                    )
-
-                dem = src.read(1).astype(np.float64)
-                nodata = params.nodata if params.nodata is not None else src.nodata
-                meta = src.meta.copy()
-                transform = src.transform
+            # Read DEM and metadata
+            dem, nodata, meta, transform = _read_dem(
+                input_path,
+                self.name,
+                artifact.id,
+                params.nodata,
+            )
 
             # Build validity mask (True = valid cell)
             if nodata is not None:
@@ -180,80 +325,33 @@ class HillshadeOperator:
                     inputs=[artifact.id],
                 )
 
-            # Mask nodata cells to NaN before scaling so gradient computation
-            # produces NaN (caught later) instead of wrong values from scaled nodata
-            dem_work = dem.copy()
-            dem_work[~valid] = np.nan
-            dem_scaled = dem_work * params.z_factor
-
-            # Calculate gradients using central differences
-            nrows, ncols = dem_scaled.shape
-            if nrows == 1:
-                dz_dx = np.gradient(dem_scaled, cell_width, axis=1)
-                dz_dy = np.zeros_like(dem_scaled)
-            elif ncols == 1:
-                dz_dy = np.gradient(dem_scaled, cell_height, axis=0)
-                dz_dx = np.zeros_like(dem_scaled)
-            else:
-                dz_dy, dz_dx = np.gradient(dem_scaled, cell_height, cell_width)
-
-            # Compute slope in radians
-            # tan(slope) = sqrt(dz_dx^2 + dz_dy^2)
-            slope_rad = np.arctan(np.sqrt(dz_dx**2 + dz_dy**2))
-
-            # Compute aspect (downslope direction) in radians (math convention: 0=E, CCW)
-            # dz_dy is d(z)/d(row) = d(z)/d(south), so the north component of
-            # the downslope vector is dz_dy (not -dz_dy).
-            # East component of downslope = -dz_dx.
-            aspect_rad = np.arctan2(dz_dy, -dz_dx)
-
-            # Convert sun angles
-            # Zenith angle: π/2 - altitude (altitude is elevation above horizon)
-            zenith_rad = np.pi / 2 - np.radians(params.altitude)
-
-            # Convert azimuth from compass to math convention
-            # Compass: 0=N, 90=E, 180=S, 270=W (clockwise from N)
-            # Math: 0=E, 90=N, 180=W, 270=S (counter-clockwise from E)
-            # Conversion: math_azimuth = 90 - compass_azimuth
-            azimuth_math_rad = np.radians(90.0 - params.azimuth)
-
-            # Horn (1981) hillshade formula
-            # illumination = cos(zenith) * cos(slope) +
-            #                sin(zenith) * sin(slope) * cos(azimuth - aspect)
-            illumination = np.cos(zenith_rad) * np.cos(slope_rad) + np.sin(zenith_rad) * np.sin(
-                slope_rad
-            ) * np.cos(azimuth_math_rad - aspect_rad)
-
-            # Clip to valid range [0, 1]
-            illumination = np.clip(illumination, 0.0, 1.0)
-
-            # Apply nodata mask — also catch NaN leaked by gradient near nodata cells
-            nan_mask = np.isnan(illumination)
-            illumination[~valid | nan_mask] = params.output_nodata
-
-            # Prepare output based on scaled parameter
-            if params.scaled:
-                # Output as float64 in range [0.0, 1.0]
-                hillshade = illumination
-                out_dtype = "float64"
-                out_nodata = params.output_nodata
-            else:
-                # Output as uint8 in range [0, 255]
-                hillshade = (illumination * 255).astype(np.uint8)
-                out_dtype = "uint8"
-                out_nodata = int(params.output_nodata)
-
-            # Update metadata for output
-            meta.update(
-                {
-                    "dtype": out_dtype,
-                    "nodata": out_nodata,
-                }
+            # Compute slope and aspect
+            slope_rad, aspect_rad = _compute_slope_aspect(
+                dem,
+                valid,
+                cell_width,
+                cell_height,
+                params.z_factor,
             )
 
-            # Write output
-            with rasterio.open(output_path, "w", **meta) as dst:
-                dst.write(hillshade, 1)
+            # Compute illumination using Horn (1981) formula
+            illumination = _compute_illumination(
+                slope_rad,
+                aspect_rad,
+                valid,
+                params.azimuth,
+                params.altitude,
+                params.output_nodata,
+            )
+
+            # Write hillshade output
+            hillshade, out_dtype, out_nodata = _write_hillshade(
+                illumination,
+                output_path,
+                meta,
+                params.scaled,
+                params.output_nodata,
+            )
 
         except OperatorError:
             raise
