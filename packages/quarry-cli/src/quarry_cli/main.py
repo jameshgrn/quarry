@@ -1280,21 +1280,8 @@ def cmd_run_generic(args) -> int:
 # Parser
 # ---------------------------------------------------------------------------
 
-
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="quarry",
-        description="Quarry — geospatial execution substrate",
-    )
-    parser.add_argument(
-        "--json",
-        action="store_true",
-        dest="json_output",
-        help="Emit machine-readable JSON instead of human text",
-    )
-    subparsers = parser.add_subparsers(dest="command")
-
-    # --- artifacts ---
+def _add_artifacts_subparser(subparsers) -> None:
+    """Add the 'artifacts' subparser tree (list, show)."""
     art_parser = subparsers.add_parser("artifacts", help="Query the artifact registry")
     art_sub = art_parser.add_subparsers(dest="artifacts_command")
 
@@ -1315,20 +1302,17 @@ def build_parser() -> argparse.ArgumentParser:
     art_show.add_argument("--workspace", default=".", help="Workspace directory (default: .)")
     art_show.set_defaults(func=cmd_artifacts_show)
 
-    # --- lineage ---
+
+def _add_lineage_subparser(subparsers) -> None:
+    """Add the 'lineage' subparser."""
     lin_parser = subparsers.add_parser("lineage", help="Show artifact lineage")
     lin_parser.add_argument("artifact_id", help="Artifact ID")
     lin_parser.add_argument("--workspace", default=".", help="Workspace directory (default: .)")
     lin_parser.set_defaults(func=cmd_lineage)
 
-    # --- route ---
-    route_parser = subparsers.add_parser(
-        "route", help="Show inferred SourceRef and ranked connector matches for a source string"
-    )
-    route_parser.add_argument("source", help="Source string (path, URI, STAC reference, etc.)")
-    route_parser.set_defaults(func=cmd_route)
 
-    # --- runs ---
+def _add_runs_subparser(subparsers) -> None:
+    """Add the 'runs' subparser tree (list, show)."""
     runs_parser = subparsers.add_parser("runs", help="Inspect run records")
     runs_sub = runs_parser.add_subparsers(dest="runs_command")
 
@@ -1349,7 +1333,9 @@ def build_parser() -> argparse.ArgumentParser:
     runs_show.add_argument("--workspace", default=".", help="Workspace directory (default: .)")
     runs_show.set_defaults(func=cmd_runs_show)
 
-    # --- checks ---
+
+def _add_checks_subparser(subparsers) -> None:
+    """Add the 'checks' subparser tree (show)."""
     checks_parser = subparsers.add_parser("checks", help="Inspect validation checks")
     checks_sub = checks_parser.add_subparsers(dest="checks_command")
 
@@ -1359,7 +1345,18 @@ def build_parser() -> argparse.ArgumentParser:
     checks_show.add_argument("--workspace", default=".", help="Workspace directory (default: .)")
     checks_show.set_defaults(func=cmd_checks_show)
 
-    # --- run ---
+
+def _add_route_subparser(subparsers) -> None:
+    """Add the 'route' subparser."""
+    route_parser = subparsers.add_parser(
+        "route", help="Show inferred SourceRef and ranked connector matches for a source string"
+    )
+    route_parser.add_argument("source", help="Source string (path, URI, STAC reference, etc.)")
+    route_parser.set_defaults(func=cmd_route)
+
+
+def _add_run_subparser(subparsers) -> None:
+    """Add the 'run' subparser tree (hydrology, zonal, sample, rasterize, and generic dispatch)."""
     run_parser = subparsers.add_parser("run", help="Execute a flow")
     run_sub = run_parser.add_subparsers(dest="run_command")
 
@@ -1462,6 +1459,27 @@ def build_parser() -> argparse.ArgumentParser:
             help="Workspace directory (default: .)",
         )
         op_parser.set_defaults(func=cmd_run_generic, operator_name=op_name)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="quarry",
+        description="Quarry — geospatial execution substrate",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        dest="json_output",
+        help="Emit machine-readable JSON instead of human text",
+    )
+    subparsers = parser.add_subparsers(dest="command")
+
+    _add_artifacts_subparser(subparsers)
+    _add_lineage_subparser(subparsers)
+    _add_runs_subparser(subparsers)
+    _add_checks_subparser(subparsers)
+    _add_route_subparser(subparsers)
+    _add_run_subparser(subparsers)
 
     return parser
 
