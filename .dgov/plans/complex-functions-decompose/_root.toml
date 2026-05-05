@@ -1,4 +1,0 @@
-[plan]
-name = "complex-functions-decompose"
-summary = "Three independent refactors of top sentrux complex-function offenders (d8, flat-gradient, topojson geometry); pure refactors, parallel-safe, no behavior change."
-sections = ["tasks"]
