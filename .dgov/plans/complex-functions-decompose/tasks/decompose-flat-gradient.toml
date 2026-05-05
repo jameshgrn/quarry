@@ -1,4 +1,4 @@
-[tasks.extract-helpers]
+[tasks.decompose-flat-gradient]
 summary = "Extract flat-cell detection, outlet seeding, and BFS distance helpers from _apply_flat_gradient. Pure refactor — no behavior change."
 prompt = """
 Orient:

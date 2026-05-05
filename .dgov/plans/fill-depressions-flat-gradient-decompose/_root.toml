@@ -1,4 +1,0 @@
-[plan]
-name = "fill-depressions-flat-gradient-decompose"
-summary = "Decompose _apply_flat_gradient in fill_depressions.py into 2-4 named module-level helpers. Pure refactor — no algorithm or behavior change."
-sections = ["tasks"]

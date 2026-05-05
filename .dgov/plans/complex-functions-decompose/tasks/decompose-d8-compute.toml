@@ -1,4 +1,4 @@
-[tasks.extract-helpers]
+[tasks.decompose-d8-compute]
 summary = "Extract steepest-descent and flat-resolution helpers from _compute_d8 in d8_flow_direction.py. Pure refactor — no behavior change."
 prompt = """
 Orient:
@@ -20,13 +20,13 @@ Edit:
    Keep its existing docstring (the two-pass description) intact on `_compute_d8`.
 3. Helper placement: module-level private functions (`def _helper_name(...)`), NOT methods on `D8FlowDirectionOperator`. Type hints required on every parameter and return type, matching the signatures above. Use the existing module-level constants (`D8_DR`, `D8_DC`, `D8_DIST`, `OUTLET`, `PIT`, `NODATA`) directly — do not redefine them, do not pass them as arguments.
 4. Do NOT change: the `_compute_d8` public signature, the `_count_internal_outlets` function, `D8FlowDirectionOperator` (any method, including `execute`, `validate_inputs`, `_run_checks`, `declared_checks`, `name`, `spec`), `D8FlowDirectionParams`, the module-level constants, the direction encoding, the algorithm semantics, or the tie-breaking behavior (strict `>` for steepest-descent, first-match in flat resolution).
-5. Do NOT change the public function signature, the algorithm, the return shape, or any caller-visible behavior. Do NOT add new validation, new dataclass fields, new lineage params, new checks, new constants, vectorization, numba, or any "while you're here" cleanup. The existing pressure tests in `tests/pressure_test/test_d8_flow_direction.py` must pass without modification.
+5. Do NOT add new validation, new dataclass fields, new lineage params, new checks, new constants, vectorization, numba, or any "while you're here" cleanup. The existing pressure tests in `tests/pressure_test/test_d8_flow_direction.py` must pass without modification.
 
 Verify:
 - `uv run ruff check packages/quarry-operators/src/quarry_operators/d8_flow_direction.py`
 - `uv run ruff format --check packages/quarry-operators/src/quarry_operators/d8_flow_direction.py`
 - Quick syntax / import sanity: `uv run python -c "from quarry_operators.d8_flow_direction import D8FlowDirectionOperator, D8FlowDirectionParams, _compute_d8, _steepest_descent_at, _assign_steepest_descent, _resolve_flat_pits, D8_DR, D8_DC, OUTLET, PIT, NODATA; print('ok')"`
-- The settlement gate runs the full pressure suite — trust it; do NOT run pytest yourself. The existing tests in `tests/pressure_test/test_d8_flow_direction.py` (which import `_compute_d8` directly and exercise uniform slopes, diagonal weighting, boundary OUTLET, unfilled PIT, NODATA masking, cone radial flow, flat-surface resolution, and the FillDepressions->D8 chain) must pass with no source changes to the test file.
+- The settlement gate runs the full pressure suite — trust it; do NOT run pytest yourself.
 """
 commit_message = "quarry-operators: extract d8 compute helpers"
 self_review = true
