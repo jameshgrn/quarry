@@ -19,6 +19,7 @@ Checks: no_interior_pits, elevation_only_raised, backing_accessible
 from __future__ import annotations
 
 import heapq
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -356,17 +357,9 @@ def _priority_flood(dem: np.ndarray, valid: np.ndarray) -> np.ndarray:
 # ---------------------------------------------------------------------------
 
 
-def _apply_flat_gradient(filled: np.ndarray, valid: np.ndarray, epsilon: float) -> np.ndarray:
-    """Apply micro-gradient to flat regions so D8 can resolve flow direction.
-
-    Strategy: BFS from higher terrain into flat regions, incrementing
-    elevation by epsilon per step. This creates a gentle slope toward
-    the outlet of each flat.
-    """
+def _identify_flat_cells(filled: np.ndarray, valid: np.ndarray) -> np.ndarray:
+    """Phase 1: Detect flat cells via per-cell D8 neighbor scan excluding boundary."""
     nrows, ncols = filled.shape
-    gradient = filled.copy()
-
-    # Identify flat cells: valid cells that were raised (have no lower valid neighbor)
     flat = np.zeros((nrows, ncols), dtype=bool)
     for r in range(1, nrows - 1):
         for c in range(1, ncols - 1):
@@ -385,19 +378,17 @@ def _apply_flat_gradient(filled: np.ndarray, valid: np.ndarray, epsilon: float) 
                 if r == 0 or r == nrows - 1 or c == 0 or c == ncols - 1:
                     continue
                 flat[r, c] = True
+    return flat
 
-    if not np.any(flat):
-        return gradient
 
-    # BFS from non-flat edges into flat regions
-    # "edges" = flat cells adjacent to non-flat lower/equal terrain
-    from collections import deque
-
+def _seed_flat_outlets(
+    flat: np.ndarray, valid: np.ndarray
+) -> tuple[np.ndarray, deque[tuple[int, int]]]:
+    """Phase 2: Seed a BFS queue with flat cells that touch a non-flat valid neighbor (outlets)."""
+    nrows, ncols = flat.shape
     dist = np.full((nrows, ncols), -1, dtype=np.int32)
     queue: deque[tuple[int, int]] = deque()
 
-    # Find flat cells that neighbor a non-flat cell with lower elevation
-    # These are the outlets of flat regions
     for r in range(nrows):
         for c in range(ncols):
             if not flat[r, c]:
@@ -407,12 +398,18 @@ def _apply_flat_gradient(filled: np.ndarray, valid: np.ndarray, epsilon: float) 
                 nc = c + _D8_DC[d]
                 if 0 <= nr < nrows and 0 <= nc < ncols:
                     if valid[nr, nc] and not flat[nr, nc]:
-                        # This flat cell touches a non-flat cell
                         dist[r, c] = 0
                         queue.append((r, c))
                         break
 
-    # BFS to assign distance from outlet edge
+    return dist, queue
+
+
+def _propagate_flat_distance(
+    flat: np.ndarray, dist: np.ndarray, queue: deque[tuple[int, int]]
+) -> None:
+    """Phase 3: BFS-propagate integer distance from outlet edge across flat regions."""
+    nrows, ncols = flat.shape
     while queue:
         r, c = queue.popleft()
         for d in range(8):
@@ -423,7 +420,24 @@ def _apply_flat_gradient(filled: np.ndarray, valid: np.ndarray, epsilon: float) 
                     dist[nr, nc] = dist[r, c] + 1
                     queue.append((nr, nc))
 
-    # Apply gradient: cells farther from outlet get higher elevation
+
+def _apply_flat_gradient(filled: np.ndarray, valid: np.ndarray, epsilon: float) -> np.ndarray:
+    """Apply micro-gradient to flat regions so D8 can resolve flow direction.
+
+    Strategy: BFS from higher terrain into flat regions, incrementing
+    elevation by epsilon per step. This creates a gentle slope toward
+    the outlet of each flat.
+    """
+    gradient = filled.copy()
+
+    flat = _identify_flat_cells(filled, valid)
+    if not np.any(flat):
+        return gradient
+
+    dist, queue = _seed_flat_outlets(flat, valid)
+    _propagate_flat_distance(flat, dist, queue)
+
+    # Phase 4: Add dist * epsilon to filled elevations where dist >= 0
     mask = dist >= 0
     gradient[mask] += dist[mask].astype(np.float64) * epsilon
 
