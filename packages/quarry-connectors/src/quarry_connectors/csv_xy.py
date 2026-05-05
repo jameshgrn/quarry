@@ -137,6 +137,103 @@ def _is_numeric(value: str) -> bool:
         return False
 
 
+def _resolve_coordinate_columns(
+    headers: list[str],
+    explicit_lon_col: str | None,
+    explicit_lat_col: str | None,
+    file_path: Path,
+) -> tuple[str | None, str | None, str | None]:
+    """Resolve coordinate columns from explicit or auto-detected values.
+
+    Returns:
+        Tuple of (lon_col, lat_col, crs_hint).
+    """
+    lon_col: str | None = explicit_lon_col
+    lat_col: str | None = explicit_lat_col
+    crs_hint: str | None = None
+
+    if lon_col is None or lat_col is None:
+        detected_lon, detected_lat, detected_crs = _detect_coordinate_columns(headers)
+        if lon_col is None:
+            lon_col = detected_lon
+        if lat_col is None:
+            lat_col = detected_lat
+        crs_hint = detected_crs
+    else:
+        # Validate explicit columns exist
+        if lon_col not in headers:
+            raise MaterializeError(
+                str(file_path), f"Explicit longitude column not found: {lon_col}"
+            )
+        if lat_col not in headers:
+            raise MaterializeError(str(file_path), f"Explicit latitude column not found: {lat_col}")
+        # Determine CRS from explicit column names
+        norm_lon = _normalize_column(lon_col)
+        norm_lat = _normalize_column(lat_col)
+        if norm_lon in ("lon", "longitude", "lng", "long") or norm_lat in (
+            "lat",
+            "latitude",
+        ):
+            crs_hint = "EPSG:4326"
+
+    return lon_col, lat_col, crs_hint
+
+
+def _scan_coordinate_rows(
+    reader: csv.reader,  # type: ignore[type-arg]
+    lon_idx: int,
+    lat_idx: int,
+) -> tuple[int, int, tuple[float, float, float, float] | None]:
+    """Scan CSV rows and extract coordinate statistics.
+
+    Returns:
+        Tuple of (row_count, valid_feature_count, extent).
+    """
+    row_count = 0
+    valid_feature_count = 0
+    x_values: list[float] = []
+    y_values: list[float] = []
+
+    for row in reader:
+        row_count += 1
+
+        if len(row) <= max(lon_idx, lat_idx):
+            continue  # Skip malformed rows
+
+        lon_val = row[lon_idx].strip()
+        lat_val = row[lat_idx].strip()
+
+        if _is_numeric(lon_val) and _is_numeric(lat_val):
+            try:
+                x = float(lon_val)
+                y = float(lat_val)
+                x_values.append(x)
+                y_values.append(y)
+                valid_feature_count += 1
+            except ValueError:
+                pass  # Skip non-numeric values
+
+    extent: tuple[float, float, float, float] | None = None
+    if x_values and y_values:
+        extent = (min(x_values), min(y_values), max(x_values), max(y_values))
+
+    return row_count, valid_feature_count, extent
+
+
+def _count_table_rows(
+    reader: csv.reader,  # type: ignore[type-arg]
+) -> int:
+    """Count rows in a CSV without coordinate columns.
+
+    Returns:
+        Total row count.
+    """
+    row_count = 0
+    for _ in reader:
+        row_count += 1
+    return row_count
+
+
 def _read_csv_metadata(
     file_path: Path,
     delimiter: str | None = None,
@@ -169,13 +266,11 @@ def _read_csv_metadata(
     columns: list[str] = []
     row_count = 0
     valid_feature_count = 0
-    lon_col: str | None = explicit_lon_col
-    lat_col: str | None = explicit_lat_col
+    lon_col: str | None = None
+    lat_col: str | None = None
     crs_hint: str | None = None
     extent: tuple[float, float, float, float] | None = None
-
-    x_values: list[float] = []
-    y_values: list[float] = []
+    has_coordinates = False
 
     try:
         with open(file_path, encoding="utf-8", newline="") as f:
@@ -189,70 +284,25 @@ def _read_csv_metadata(
 
             columns = headers
 
-            # Detect coordinate columns if not explicitly provided
-            if lon_col is None or lat_col is None:
-                detected_lon, detected_lat, detected_crs = _detect_coordinate_columns(headers)
-                if lon_col is None:
-                    lon_col = detected_lon
-                if lat_col is None:
-                    lat_col = detected_lat
-                crs_hint = detected_crs
-            else:
-                # Validate explicit columns exist
-                if lon_col not in headers:
-                    raise MaterializeError(
-                        str(file_path), f"Explicit longitude column not found: {lon_col}"
-                    )
-                if lat_col not in headers:
-                    raise MaterializeError(
-                        str(file_path), f"Explicit latitude column not found: {lat_col}"
-                    )
-                # Determine CRS from explicit column names
-                norm_lon = _normalize_column(lon_col)
-                norm_lat = _normalize_column(lat_col)
-                if norm_lon in ("lon", "longitude", "lng", "long") or norm_lat in (
-                    "lat",
-                    "latitude",
-                ):
-                    crs_hint = "EPSG:4326"
-
+            # Resolve coordinate columns (auto-detect or explicit)
+            lon_col, lat_col, crs_hint = _resolve_coordinate_columns(
+                headers, explicit_lon_col, explicit_lat_col, file_path
+            )
             has_coordinates = lon_col is not None and lat_col is not None
 
             if has_coordinates:
                 lon_idx = headers.index(lon_col)
                 lat_idx = headers.index(lat_col)
-
-                for row in reader:
-                    row_count += 1
-
-                    if len(row) <= max(lon_idx, lat_idx):
-                        continue  # Skip malformed rows
-
-                    lon_val = row[lon_idx].strip()
-                    lat_val = row[lat_idx].strip()
-
-                    if _is_numeric(lon_val) and _is_numeric(lat_val):
-                        try:
-                            x = float(lon_val)
-                            y = float(lat_val)
-                            x_values.append(x)
-                            y_values.append(y)
-                            valid_feature_count += 1
-                        except ValueError:
-                            pass  # Skip non-numeric values
+                row_count, valid_feature_count, extent = _scan_coordinate_rows(
+                    reader, lon_idx, lat_idx
+                )
             else:
-                # Just count rows for table data
-                for _ in reader:
-                    row_count += 1
+                row_count = _count_table_rows(reader)
 
     except csv.Error as e:
         raise MaterializeError(str(file_path), f"CSV parsing error: {e}") from e
     except UnicodeDecodeError as e:
         raise MaterializeError(str(file_path), f"File encoding error: {e}") from e
-
-    # Calculate extent from valid coordinates
-    if x_values and y_values:
-        extent = (min(x_values), min(y_values), max(x_values), max(y_values))
 
     return {
         "columns": columns,
