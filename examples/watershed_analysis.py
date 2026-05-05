@@ -26,6 +26,7 @@ import fiona
 import numpy as np
 import rasterio
 from quarry_connectors.router import build_default_router
+from quarry_core.artifact import Artifact
 from quarry_core.executors.local import LocalExecutor
 from quarry_core.source_ref import SourceRef
 from quarry_operators.build_cog import BuildCOGOperator, BuildCOGParams
@@ -105,18 +106,7 @@ def create_zone_polygons(path: Path) -> Path:
     return path
 
 
-def main() -> None:
-    import tempfile
-
-    workspace = Path(tempfile.mkdtemp(prefix="quarry_example_"))
-    data_dir = workspace / "data"
-    hydro_dir = workspace / "hydro"
-    export_dir = workspace / "export"
-    data_dir.mkdir()
-    export_dir.mkdir()
-
-    print(f"Workspace: {workspace}\n")
-
+def _ingest_phase(workspace: Path, data_dir: Path) -> tuple[Artifact, Artifact]:
     # ── 1. INGEST ─────────────────────────────────────────────────────────
     print("=" * 60)
     print("1. INGEST — create data and materialize through connectors")
@@ -154,6 +144,15 @@ def main() -> None:
     print(f"    Features: {zones_artifact.spatial.feature_count}")
     print()
 
+    return dem_artifact, zones_artifact
+
+
+def _process_phase(
+    workspace: Path,
+    hydro_dir: Path,
+    dem_artifact: Artifact,
+    zones_artifact: Artifact,
+) -> tuple[LocalExecutor, Registry, object]:
     # ── 2. PROCESS ────────────────────────────────────────────────────────
     print("=" * 60)
     print("2. PROCESS — hydrology chain: fill → D8 → accumulation")
@@ -189,6 +188,16 @@ def main() -> None:
         print("  All checks passed")
     print()
 
+    return executor, registry, flow_result
+
+
+def _analyze_phase(
+    workspace: Path,
+    executor: LocalExecutor,
+    registry: Registry,
+    flow_result: object,
+    zones_artifact: Artifact,
+) -> Artifact:
     # ── 3. ANALYZE ────────────────────────────────────────────────────────
     print("=" * 60)
     print("3. ANALYZE — zonal statistics of flow accumulation per zone")
@@ -226,6 +235,15 @@ def main() -> None:
         print(f"    {name}: mean={mean:.1f}, max={mx:.1f}, count={cnt}")
     print()
 
+    return zonal_artifact
+
+
+def _export_phase(
+    export_dir: Path,
+    executor: LocalExecutor,
+    registry: Registry,
+    flow_result: object,
+) -> Artifact:
     # ── 4. EXPORT ─────────────────────────────────────────────────────────
     print("=" * 60)
     print("4. EXPORT — normalize flow accumulation to Cloud-Optimized GeoTIFF")
@@ -256,6 +274,10 @@ def main() -> None:
     print(f"  Checks: {cog_checks}")
     print()
 
+    return cog_artifact
+
+
+def _inspect_phase(registry: Registry, cog_artifact: Artifact, zonal_artifact: Artifact) -> None:
     # ── 5. INSPECT ────────────────────────────────────────────────────────
     print("=" * 60)
     print("5. INSPECT — registry contents and lineage")
@@ -288,6 +310,27 @@ def main() -> None:
     print("Done. All artifacts, runs, checks, and lineage persisted.")
     print(f"Registry: {registry.db_path}")
     print("=" * 60)
+
+
+def main() -> None:
+    import tempfile
+
+    workspace = Path(tempfile.mkdtemp(prefix="quarry_example_"))
+    data_dir = workspace / "data"
+    hydro_dir = workspace / "hydro"
+    export_dir = workspace / "export"
+    data_dir.mkdir()
+    export_dir.mkdir()
+
+    print(f"Workspace: {workspace}\n")
+
+    dem_artifact, zones_artifact = _ingest_phase(workspace, data_dir)
+    executor, registry, flow_result = _process_phase(
+        workspace, hydro_dir, dem_artifact, zones_artifact
+    )
+    zonal_artifact = _analyze_phase(workspace, executor, registry, flow_result, zones_artifact)
+    cog_artifact = _export_phase(export_dir, executor, registry, flow_result)
+    _inspect_phase(registry, cog_artifact, zonal_artifact)
 
 
 if __name__ == "__main__":
