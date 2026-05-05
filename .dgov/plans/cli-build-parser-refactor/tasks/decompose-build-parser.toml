@@ -1,0 +1,43 @@
+[tasks.decompose-build-parser]
+summary = "Decompose build_parser (183 lines) into per-command subparser builder helpers. Pure refactor — no CLI behavior change."
+prompt = """
+Orient:
+- Read `packages/quarry-cli/src/quarry_cli/main.py` end-to-end. The `build_parser()` function is around line 1284 (183 lines), containing the top-level parser, the `--workspace` and `--json` global flags, and inline subparser construction for: `artifacts list`, `artifacts show`, `lineage`, `runs list`, `runs show`, `checks show`, `route`, and the `run` family (`run hydrology`, `run zonal`, `run sample`, `run rasterize`, plus the generic `run <op>` dispatch loop).
+- Lane: adapter (refactor only). One logical commit.
+- Doctrine: this is a strict refactor. The CLI surface — every flag, every subcommand, every help string — must be byte-identical. The 19 existing CLI pressure tests across `test_cli_zonal.py`, `test_cli_sample.py`, `test_cli_rasterize.py`, `test_cli_inspection.py`, `test_cli_route.py`, `test_cli_json.py` must keep passing without modification.
+- HARD BOUNDARY: only `packages/quarry-cli/src/quarry_cli/main.py` may be MODIFIED. Do NOT touch any test file, any other package source, or any doc. The settlement gate runs the full pressure suite — trust it.
+
+Edit:
+1. In `packages/quarry-cli/src/quarry_cli/main.py`, decompose `build_parser()` into six private helper functions, each taking the top-level `subparsers` action object (returned by `parser.add_subparsers(...)`) and adding the relevant subparser tree:
+   - `_add_artifacts_subparser(subparsers)` — handles `artifacts list` and `artifacts show`.
+   - `_add_lineage_subparser(subparsers)` — handles `lineage`.
+   - `_add_runs_subparser(subparsers)` — handles `runs list` and `runs show`.
+   - `_add_checks_subparser(subparsers)` — handles `checks show`.
+   - `_add_route_subparser(subparsers)` — handles `route`.
+   - `_add_run_subparser(subparsers)` — handles the `run` family: hydrology, zonal, sample, rasterize, AND the generic dispatch loop over `OPERATOR_NAMES` at the end.
+2. Each helper must reproduce the existing subparser construction byte-identically: same arg names, same defaults, same help strings, same `set_defaults(func=...)` wiring, same `dest=...` choices.
+3. After extraction, `build_parser()` should:
+   - Build the top-level `parser` with `argparse.ArgumentParser(...)`, the existing `--workspace` and `--json` (`dest="json_output"`) flags, the existing description.
+   - Call `subparsers = parser.add_subparsers(dest="command")`.
+   - Call each `_add_*_subparser(subparsers)` helper in the same order the subparsers were originally added.
+   - Return `parser`.
+   - Result: `build_parser()` is ≤30 lines.
+4. Helper placement: define all six helpers as module-level private functions IMMEDIATELY BEFORE `build_parser()`. Each helper returns nothing (`-> None`); they mutate the `subparsers` action.
+5. Do NOT change:
+   - The order or names of subcommands.
+   - Any flag name, default, type, help, or destination.
+   - The `cmd_*` handler functions or their signatures.
+   - The `OPERATOR_NAMES` import location or usage.
+   - The `main()` function or `if __name__ == "__main__":` block.
+6. Do NOT add new arguments, new helpers beyond the six listed, or any "while you're here" cleanup.
+
+Verify:
+- `uv run ruff check packages/quarry-cli/src/quarry_cli/main.py`
+- `uv run ruff format --check packages/quarry-cli/src/quarry_cli/main.py`
+- `uv run python -c "from quarry_cli.main import build_parser; p = build_parser(); print(sorted(p._actions[1].choices.keys()))"` should print exactly `['artifacts', 'checks', 'lineage', 'route', 'run', 'runs']` (or whatever exact set existed pre-refactor — match HEAD).
+- The settlement gate runs the full pressure suite — trust it; do NOT run pytest yourself. The CLI tests must pass without modification.
+"""
+commit_message = "quarry-cli: decompose build_parser into per-command helpers"
+self_review = true
+
+files.edit = ["packages/quarry-cli/src/quarry_cli/main.py"]

@@ -1,0 +1,31 @@
+[tasks.extract-helpers]
+summary = "Extract _rasterize_single_band and _rasterize_multi_band helpers from RasterizeVectorOperator.execute. Pure refactor — no behavior change."
+prompt = """
+Orient:
+- Read `packages/quarry-operators/src/quarry_operators/rasterize_vector.py` end-to-end. The `RasterizeVectorOperator.execute()` method is currently 220 lines (line ~144 onward), containing extent computation, fiona open, single-band shape building (when `params.burn_attribute is not None` or constant `burn_value`), multi-band shape building (when `params.burn_attributes is not None`), rasterization via `rasterio.features.rasterize`, GeoTIFF write, artifact assembly, and check execution. The function was flagged as the top long-function offender in the codebase by sentrux.
+- Lane: operator (refactor only). One logical commit.
+- Doctrine: this is a strict refactor. No public behavior change. The existing 30 pressure tests in `tests/pressure_test/test_rasterize_vector.py` must keep passing without modification — including assertions on output `band_count`, `shapes_burned` metadata, lineage params, and per-band raster values.
+- HARD BOUNDARY: only `packages/quarry-operators/src/quarry_operators/rasterize_vector.py` may be MODIFIED. The test file is in `files.read` ONLY — do not open, edit, or delete it. The settlement gate runs the full pressure suite — trust it; do not run pytest yourself.
+
+Edit:
+1. In `packages/quarry-operators/src/quarry_operators/rasterize_vector.py`, refactor `RasterizeVectorOperator.execute()` so it becomes ≤120 lines and reads as orchestration:
+   a. Extract a private module-level (or static-method) helper `_rasterize_single_band(src, transform, params, height, width, dtype) -> tuple[np.ndarray, int]`. Inside: iterate `src` features, build the existing `shapes: list[tuple[geojson, float]]` list using the constant-burn / single-attribute path, call `rasterio.features.rasterize(shapes, out_shape=(height, width), transform=transform, fill=params.nodata, dtype=dtype, all_touched=params.all_touched)` (or the empty-shapes nodata fallback), and return `(burned_2d, len(shapes))`. The 2D ndarray, plus a count of features that contributed.
+   b. Extract a private helper `_rasterize_multi_band(src, transform, params, height, width, dtype) -> tuple[np.ndarray, int]`. Inside: iterate features once, build `shapes_per_band: list[list[tuple[geojson, float]]]` of length `len(params.burn_attributes)`, rasterize each band independently (mirroring the existing logic), stack into `(N, H, W)`, and return `(stack_3d, sum(len(s) for s in shapes_per_band))`.
+   c. `execute()` becomes: validate, compute extent + transform + dimensions + dtype, open fiona src, branch on `params.burn_attributes is not None` to call the appropriate helper, get `(burned, shapes_burned)` plus `band_count = burned.shape[0] if burned.ndim == 3 else 1`, write GeoTIFF (single-band uses `dst.write(burned, 1)`, multi-band uses the loop `for i in range(band_count): dst.write(burned[i], i + 1)`), then assemble Artifact (band_count, lineage params, metadata) and run checks. Keep the existing exception handling shape: catch `OperatorError`, re-raise; wrap any other exception in `OperatorError(self.name, f"Rasterization failed: {e}", inputs=...)`.
+2. Helper placement: define both helpers as module-level private functions BEFORE the `RasterizeVectorOperator` class, using `def _rasterize_single_band(...)` (lowercase + leading underscore). Type hints required: `np.ndarray`, `int`, `RasterizeVectorParams`, plus the fiona src and rasterio transform passed by reference.
+3. Imports: `rasterio.features.rasterize` and `numpy as np` are already imported inside `execute`. Move those imports to module level if cleaner (still inside the function is fine — match existing style; do NOT change unrelated import locations).
+4. Do NOT change: the `RasterizeVectorParams` dataclass, the `validate_inputs` method, the `_run_checks` method, the `OperatorSpec`, or any public class/method name.
+5. Do NOT add any new validation, any new lineage fields, any "while you're here" cleanup of unrelated code.
+
+Verify:
+- `uv run ruff check packages/quarry-operators/src/quarry_operators/rasterize_vector.py`
+- `uv run ruff format --check packages/quarry-operators/src/quarry_operators/rasterize_vector.py`
+- `wc -l packages/quarry-operators/src/quarry_operators/rasterize_vector.py` reports a higher line count than HEAD (helpers add lines), but `RasterizeVectorOperator.execute` itself fits in ≤120 lines.
+- Quick syntax check: `uv run python -c "from quarry_operators.rasterize_vector import RasterizeVectorOperator, _rasterize_single_band, _rasterize_multi_band; print('ok')"` (use the PYTHONPATH already set up by the worktree).
+- The settlement gate runs the full pressure suite — trust it; do NOT run pytest yourself. The 30 existing rasterize tests must pass with no source changes to the test file.
+"""
+commit_message = "quarry-operators: extract rasterize single/multi-band helpers"
+self_review = true
+
+files.edit = ["packages/quarry-operators/src/quarry_operators/rasterize_vector.py"]
+files.read = ["tests/pressure_test/test_rasterize_vector.py"]
