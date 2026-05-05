@@ -121,6 +121,20 @@ class TestRouteJson:
         assert data["matches"] == []
         assert data["selected"] is None
 
+    def test_route_json_params_is_nested_object(self, capsys):
+        # S3 URLs produce MappingProxyType params that should serialize as nested JSON
+        rc = main(["--json", "route", "s3://bucket/dem.tif"])
+        captured = capsys.readouterr()
+        assert rc == 0
+
+        data = json.loads(captured.out)
+        assert "source" in data
+        assert "params" in data["source"]
+
+        # params should be a dict, not a stringified repr
+        assert isinstance(data["source"]["params"], dict)
+        assert data["source"]["params"]["scheme"] == "s3"
+
 
 # ---------------------------------------------------------------------------
 # Artifacts command JSON tests

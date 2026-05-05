@@ -11,7 +11,9 @@ import argparse
 import json
 import os
 import sys
+from collections.abc import Mapping
 from pathlib import Path
+from types import MappingProxyType
 
 from quarry_connectors.router import build_default_router
 from quarry_core.executor import RunRecord
@@ -114,9 +116,18 @@ def _require_run_output(run_record: RunRecord) -> OperatorResult:
     return run_record.output
 
 
+def _json_default(obj):
+    """Custom JSON encoder that converts Mapping types to dicts."""
+    if isinstance(obj, MappingProxyType):
+        return dict(obj)
+    if isinstance(obj, Mapping) and not isinstance(obj, dict):
+        return dict(obj)
+    return str(obj)
+
+
 def _emit_json(data) -> None:
     """Print one JSON object to stdout. Used when args.json_output is True."""
-    print(json.dumps(data, default=str, sort_keys=True))
+    print(json.dumps(data, default=_json_default, sort_keys=True))
 
 
 # ---------------------------------------------------------------------------
