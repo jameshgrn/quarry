@@ -29,6 +29,9 @@ Stress points:
 24. Multi-band per-band values correct
 25. burn_attribute and burn_attributes mutually exclusive
 26. Empty burn_attributes rejected
+27. LineString rasterization with all_touched=True
+28. Point rasterization at single pixel
+29. MultiPolygon rasterization (one feature, multiple geometries)
 """
 
 from __future__ import annotations
@@ -54,7 +57,7 @@ from quarry_operators.rasterize_vector import (
     RasterizeVectorParams,
 )
 from rasterio.crs import CRS
-from shapely.geometry import Polygon, mapping
+from shapely.geometry import LineString, MultiPolygon, Point, Polygon, mapping
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -76,6 +79,27 @@ def _write_vector(path, polygons, crs_epsg=32610, properties=None):
         for i, poly in enumerate(polygons):
             props = properties[i] if properties else {}
             dst.write({"geometry": mapping(poly), "properties": props})
+
+
+def _write_features(path, geometries, geometry_type, crs_epsg=32610, properties=None):
+    """Write geometries to GeoJSON with explicit geometry type schema.
+
+    geometry_type: "Point", "LineString", "Polygon", "MultiPolygon", etc.
+    properties: list of dicts parallel to geometries.
+    """
+    prop_schema = {}
+    if properties and len(properties) > 0:
+        for k, v in properties[0].items():
+            if isinstance(v, (int, float)):
+                prop_schema[k] = "float"
+            else:
+                prop_schema[k] = "str"
+    schema = {"geometry": geometry_type, "properties": prop_schema}
+    crs = CRS.from_epsg(crs_epsg).to_dict()
+    with fiona.open(path, "w", driver="GeoJSON", crs=crs, schema=schema) as dst:
+        for i, geom in enumerate(geometries):
+            props = properties[i] if properties else {}
+            dst.write({"geometry": mapping(geom), "properties": props})
 
 
 def _make_vector_artifact(path, crs_epsg=32610):
@@ -1041,3 +1065,91 @@ def test_empty_burn_attributes_rejected(op, workspace):
 
     errors = op.validate_inputs([vec_art], params)
     assert any("non-empty" in e.lower() for e in errors)
+
+
+# ---------------------------------------------------------------------------
+# 29. LineString rasterization with all_touched=True
+# ---------------------------------------------------------------------------
+
+
+def test_rasterize_linestring(op, workspace):
+    """LineString rasterization registers pixels with all_touched=True."""
+    line = LineString([(0.5, 0.5), (3.5, 3.5)])
+    vec_path = workspace / "input.geojson"
+    _write_features(vec_path, [line], geometry_type="LineString")
+    vec_art = _make_vector_artifact(vec_path)
+
+    params = RasterizeVectorParams(
+        output_path=str(workspace / "out.tif"),
+        resolution=(1.0, 1.0),
+        extent=(0, 0, 4, 4),
+        burn_value=5.0,
+        nodata=0.0,
+        all_touched=True,
+    )
+
+    result = op.execute([vec_art], params)
+    assert result.artifact.metadata["shapes_burned"] == 1
+
+    data, _ = _read_raster(result.artifact.backing.uri)
+    assert np.any(data == 5.0)
+    assert np.any(data == 0.0)
+
+
+# ---------------------------------------------------------------------------
+# 30. Point rasterization at single pixel
+# ---------------------------------------------------------------------------
+
+
+def test_rasterize_point(op, workspace):
+    """Point rasterization burns exactly one pixel."""
+    point = Point(1.5, 1.5)
+    vec_path = workspace / "input.geojson"
+    _write_features(vec_path, [point], geometry_type="Point")
+    vec_art = _make_vector_artifact(vec_path)
+
+    params = RasterizeVectorParams(
+        output_path=str(workspace / "out.tif"),
+        resolution=(1.0, 1.0),
+        extent=(0, 0, 4, 4),
+        burn_value=7.0,
+        nodata=0.0,
+    )
+
+    result = op.execute([vec_art], params)
+    assert result.artifact.metadata["shapes_burned"] == 1
+
+    data, _ = _read_raster(result.artifact.backing.uri)
+    assert np.sum(data == 7.0) == 1
+    assert np.all(data[data != 7.0] == 0.0)
+
+
+# ---------------------------------------------------------------------------
+# 31. MultiPolygon rasterization (one feature, multiple geometries)
+# ---------------------------------------------------------------------------
+
+
+def test_rasterize_multipolygon(op, workspace):
+    """MultiPolygon rasterization burns all component polygons."""
+    # Two disjoint unit squares: (0,0)-(1,1) and (3,3)-(4,4)
+    poly1 = Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])
+    poly2 = Polygon([(3, 3), (4, 3), (4, 4), (3, 4)])
+    multipoly = MultiPolygon([poly1, poly2])
+    vec_path = workspace / "input.geojson"
+    _write_features(vec_path, [multipoly], geometry_type="MultiPolygon")
+    vec_art = _make_vector_artifact(vec_path)
+
+    params = RasterizeVectorParams(
+        output_path=str(workspace / "out.tif"),
+        resolution=(1.0, 1.0),
+        extent=(0, 0, 4, 4),
+        burn_value=9.0,
+        nodata=0.0,
+    )
+
+    result = op.execute([vec_art], params)
+    assert result.artifact.metadata["shapes_burned"] == 1  # One MultiPolygon feature
+
+    data, _ = _read_raster(result.artifact.backing.uri)
+    assert np.sum(data == 9.0) >= 2  # Both component polygons burned
+    assert np.any(data == 0.0)  # Background present

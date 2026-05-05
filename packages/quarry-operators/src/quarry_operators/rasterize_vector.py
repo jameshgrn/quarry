@@ -1,7 +1,7 @@
-"""RasterizeVectorOperator — burn vector polygons into a raster grid.
+"""RasterizeVectorOperator — burn vector geometries into a raster grid.
 
 Lane: operator
-Accepts: one vector artifact (polygons)
+Accepts: one vector artifact (Point, LineString, Polygon, or Multi variants)
 Produces: one raster artifact (GeoTIFF)
 Burn modes: constant value OR single numeric attribute per feature
 Checks: crs_valid, dimensions_sane, nodata_background
@@ -174,13 +174,13 @@ def _rasterize_multi_band(
 
 
 class RasterizeVectorOperator:
-    """Burn vector polygon geometries into a raster grid.
+    """Burn vector geometries (Point, LineString, Polygon, or Multi variants) into a raster grid.
 
-    Input 0: vector artifact (polygon geometries)
+    Input 0: vector artifact (any GeoJSON geometry type supported by rasterio.features.rasterize)
 
     Output: raster artifact (single-band or multi-band GeoTIFF). Each pixel
-    covered by a polygon receives either a constant ``burn_value`` or the value
-    of ``burn_attribute`` from that feature. Pixels not covered by any polygon
+    covered by a geometry receives either a constant ``burn_value`` or the value
+    of ``burn_attribute`` from that feature. Pixels not covered by any geometry
     receive ``nodata``. ``burn_attributes`` produces a multi-band GeoTIFF (one
     band per listed attribute). ``all_touched=True`` includes every pixel touched
     by a geometry edge.
