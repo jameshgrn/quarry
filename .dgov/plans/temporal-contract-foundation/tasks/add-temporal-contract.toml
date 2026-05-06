@@ -1,0 +1,175 @@
+[tasks.add-temporal-contract]
+summary = "Add TemporalDescriptor dataclass + Artifact.temporal field to quarry-core, with paired pressure tests and ontology doc updates. Foundation only — no connector population, no operator changes."
+prompt = """
+Orient:
+- Read `packages/quarry-core/src/quarry_core/artifact.py` end-to-end. Note: `SpatialDescriptor` (line ~88) — frozen dataclass with `crs`, `extent`, `resolution`, `feature_count`, `band_count`. `_freeze_metadata` (line ~65) — strips a `spatial_keys` set from metadata so typed contract fields can't be shadowed. `Artifact` (line ~124) — frozen dataclass with fields `type`, `name`, `backing`, `spatial`, `metadata`, `lineage` plus identity/timestamp fields. The `__post_init__` (line ~156) calls `_freeze_metadata` on the metadata field.
+- Read `tests/pressure_test/test_registry.py` lines 68-145. The `TestArtifactRoundTrip` class is the canonical Artifact-construction pressure surface. The test `test_metadata_does_not_duplicate_spatial_contract` is the precedent for "typed contract fields are stripped from metadata."
+- Read `CONTRACTS.md` end-to-end. The `## Artifact` section (line 5) is where the typed-contract field semantics are documented. The temporal contract goes here as a sibling bullet to the existing `SpatialDescriptor` description.
+- Read `PRESSURE_TESTS.md` end-to-end. Each section is numbered and dated, follows the same template (Components, Tests, Contract changes, Proved, Signals watched). The new entry follows that template.
+- Lane: artifact (canonical contract change). One logical commit.
+- Doctrine: this is an additive ontology change. The new `temporal` field defaults to `None`, so all existing artifacts and tests construct without modification. Per the project doctrine: smallest change that satisfies the test, no premature abstraction, no operator behavior changes, no connector population, quarry-core stays zero-dependency. Use only stdlib (`datetime`, `timedelta`, `timezone`, `dataclasses`, `typing`).
+- Five design decisions are LOCKED — implement exactly as stated, do not negotiate or vary:
+  D1. Use explicit `start: datetime | None` and `end: datetime | None` fields. Do NOT use a tuple.
+  D2. Require timezone-aware UTC datetimes when start/end are set. Reject naive datetimes; reject non-UTC offsets. Use `datetime.utcoffset() != timedelta(0)` to detect non-UTC.
+  D3. Three semantic states are distinct and must each be representable:
+       - `Artifact.temporal = None` means "no temporal contract declared."
+       - `Artifact.temporal = TemporalDescriptor(start=None, end=None)` means "temporal-but-unknown."
+       - `Artifact.temporal = TemporalDescriptor(start=t0, end=t1)` means "known temporal contract."
+       Do NOT collapse the first two states.
+  D4. No timezone/temporal-CRS field in v1. UTC only.
+  D5. Defer operator inheritance. Do NOT add operator helpers, propagation rules, or any operator changes.
+- HARD BOUNDARY: only the five files in this task's claim may be touched (read or write) by your tools. Do NOT open, read, or modify any other file. The settlement gate runs the full pressure suite — trust it; do NOT run pytest yourself.
+
+Edit:
+1. In `packages/quarry-core/src/quarry_core/artifact.py`:
+   a. Add stdlib imports near the top of the file: `from datetime import datetime, timedelta, timezone`. Place them with the existing stdlib imports.
+   b. Add a public frozen dataclass `TemporalDescriptor` placed immediately AFTER `SpatialDescriptor` (around line 99 or wherever SpatialDescriptor ends) and BEFORE `Lineage`. Signature:
+
+         @dataclass(frozen=True)
+         class TemporalDescriptor:
+             \"\"\"Typed temporal contract for an artifact.
+
+             Three legitimate states:
+               - all fields None: temporal-but-unknown (artifact has time but it isn't known)
+               - start == end (both set): instant (snapshot at a single moment)
+               - start < end: time range; resolution and observation_count optional
+
+             Time values must be timezone-aware UTC `datetime`. Naive or non-UTC
+             values raise `ValueError`. v1 does not support paleo/year-only/decade
+             models or non-UTC timezones — those are deferred until forced by a
+             real connector.
+             \"\"\"
+
+             start: datetime | None = None
+             end: datetime | None = None
+             resolution: timedelta | None = None
+             observation_count: int | None = None
+
+             def __post_init__(self) -> None:
+                 # D2: timezone-aware UTC required
+                 for label, value in ((\"start\", self.start), (\"end\", self.end)):
+                     if value is None:
+                         continue
+                     if value.tzinfo is None:
+                         raise ValueError(
+                             f\"TemporalDescriptor.{label} must be timezone-aware (got naive datetime)\"
+                         )
+                     if value.utcoffset() != timedelta(0):
+                         raise ValueError(
+                             f\"TemporalDescriptor.{label} must be UTC (got offset {value.utcoffset()})\"
+                         )
+                 # both-or-neither: half-open ranges deferred to v2+
+                 if (self.start is None) != (self.end is None):
+                     raise ValueError(
+                         \"TemporalDescriptor: start and end must both be set or both be None\"
+                     )
+                 # ordering
+                 if self.start is not None and self.end is not None and self.start > self.end:
+                     raise ValueError(
+                         f\"TemporalDescriptor: start ({self.start}) must be <= end ({self.end})\"
+                     )
+                 # observation_count >= 1 when set
+                 if self.observation_count is not None and self.observation_count < 1:
+                     raise ValueError(
+                         f\"TemporalDescriptor.observation_count must be >= 1 (got {self.observation_count})\"
+                     )
+                 # resolution > 0 when set
+                 if self.resolution is not None and self.resolution <= timedelta(0):
+                     raise ValueError(
+                         f\"TemporalDescriptor.resolution must be positive (got {self.resolution})\"
+                     )
+   c. Add `temporal: TemporalDescriptor | None = None` field to the `Artifact` dataclass. Place it AFTER the existing `spatial: SpatialDescriptor` field and BEFORE `metadata`. Default `None` for backward compatibility — every existing call site that does not pass `temporal=...` keeps working unchanged.
+   d. Update `_freeze_metadata` to also strip temporal-namespace metadata keys so connectors cannot shadow the typed temporal contract. Replace the existing single set with two:
+
+         spatial_keys = {\"crs\", \"extent\", \"bounds\", \"resolution\", \"feature_count\", \"band_count\"}
+         temporal_keys = {\"temporal_start\", \"temporal_end\", \"temporal_resolution\", \"temporal_observation_count\"}
+         excluded = spatial_keys | temporal_keys
+         return MappingProxyType(
+             {k: _freeze_value(v) for k, v in metadata.items() if k not in excluded}
+         )
+
+       The temporal exclusion uses the `temporal_*` prefix so it does not conflict with the existing spatial `resolution` key. Connectors that need to record temporal info do so via `Artifact.temporal`, not metadata.
+   e. Do NOT change: `SpatialDescriptor`, `BackingStore`, `Lineage`, `ArtifactType`, `BackingStoreKind`, the `_freeze_value` helper, or any other existing symbol. Do NOT alter the `Artifact` `__post_init__` beyond what's required for the new field's default to work (the default `None` requires no changes to `__post_init__` itself).
+
+2. Create `tests/pressure_test/test_temporal_descriptor.py` with the following pressure tests. Follow the existing pressure-test style in this directory: module-level docstring listing stress points, a series of plain `def test_*` functions or `class Test*:` groupings, no shared fixtures unless they exist in `conftest.py` already (check before assuming). Each test must be focused and have a one-line docstring.
+
+   Required test cases (use the exact descriptions; the test names may be adjusted for snake_case):
+     - `test_construct_all_none_is_unknown_state` — `TemporalDescriptor()` constructs with no error; all four fields are `None`.
+     - `test_construct_with_utc_instant` — `TemporalDescriptor(start=t, end=t)` for `t = datetime(2024, 6, 15, 10, 30, tzinfo=timezone.utc)` constructs with no error; `start == end`.
+     - `test_construct_with_utc_range` — `TemporalDescriptor(start=t0, end=t1, resolution=timedelta(minutes=15), observation_count=140256)` constructs with no error.
+     - `test_naive_start_rejected` — `TemporalDescriptor(start=datetime(2024, 6, 15), end=datetime(2024, 6, 15))` raises `ValueError` with \"timezone-aware\" in the message.
+     - `test_naive_end_rejected` — `TemporalDescriptor(start=datetime(2024, 6, 15, tzinfo=timezone.utc), end=datetime(2024, 6, 16))` raises `ValueError` with \"timezone-aware\" in the message.
+     - `test_non_utc_start_rejected` — pass a `datetime` with a non-UTC `timezone(timedelta(hours=-5))`; raises `ValueError` with \"UTC\" in the message.
+     - `test_half_open_range_rejected_start_only` — `TemporalDescriptor(start=t, end=None)` raises `ValueError` mentioning \"both be set or both be None\".
+     - `test_half_open_range_rejected_end_only` — symmetric: `TemporalDescriptor(start=None, end=t)` raises `ValueError`.
+     - `test_inverted_range_rejected` — `TemporalDescriptor(start=t1, end=t0)` where `t1 > t0` raises `ValueError` with \"start ... must be <=\" in the message.
+     - `test_zero_observation_count_rejected` — `observation_count=0` raises `ValueError` mentioning \">= 1\".
+     - `test_negative_observation_count_rejected` — `observation_count=-1` raises `ValueError`.
+     - `test_zero_resolution_rejected` — `resolution=timedelta(0)` raises `ValueError` mentioning \"positive\".
+     - `test_negative_resolution_rejected` — `resolution=timedelta(seconds=-1)` raises `ValueError`.
+     - `test_descriptor_is_frozen` — attempting `descriptor.start = some_other_dt` raises `dataclasses.FrozenInstanceError`.
+     - `test_descriptor_is_hashable` — two equal descriptors produce the same `hash()`; descriptor can be used as a `dict` key.
+     - `test_descriptor_equality` — two `TemporalDescriptor` instances with identical fields compare `==`; differing fields compare `!=`.
+
+   Imports the test file uses: `from datetime import datetime, timedelta, timezone`, `import dataclasses`, `import pytest`, `from quarry_core.artifact import TemporalDescriptor`.
+
+3. In `tests/pressure_test/test_registry.py`, append exactly TWO tests inside the existing `TestArtifactRoundTrip` class (around line 68). Place them AFTER the existing `test_metadata_does_not_duplicate_spatial_contract` test. Use existing fixtures and helpers from the file.
+
+   New test 1: `test_temporal_default_is_none` — construct an Artifact without passing `temporal`; assert `artifact.temporal is None`. Confirms the default lands and existing call sites still work.
+
+   New test 2: `test_metadata_does_not_duplicate_temporal_contract` — construct an Artifact with metadata containing all four temporal keys (`temporal_start`, `temporal_end`, `temporal_resolution`, `temporal_observation_count`) plus a non-conflicting key (e.g., `\"driver\"`). Assert: the four temporal keys are stripped from `artifact.metadata`; the `\"driver\"` key survives. Mirrors the existing spatial-strip test.
+
+   Do NOT modify any other test or class in this file. Do NOT alter existing fixtures.
+
+4. In `CONTRACTS.md`, update the `## Artifact` section to document the new typed temporal contract. Add a single bullet immediately after the existing `SpatialDescriptor` bullet (around line 12) and before the `Lineage` bullet, in the same style:
+
+       - **TemporalDescriptor** holds `start`, `end` (both timezone-aware UTC `datetime` or both `None`), optional `resolution` (`timedelta`), and optional `observation_count`. `Artifact.temporal = None` means \"no temporal contract declared\"; `TemporalDescriptor(start=None, end=None)` means \"temporal-but-unknown.\" v1 requires UTC; non-UTC timezones and non-`datetime` temporal models (paleo, year-only, decade) are deferred.
+
+   Also extend the existing metadata stripping note (the bullet beginning \"**Metadata** is an opaque connector extension bag...\"). Replace the parenthetical \"Top-level spatial duplicate keys (`crs`, `extent`, `bounds`, `resolution`, `feature_count`, `band_count`) are stripped at `Artifact` construction.\" with text that also mentions the temporal-namespace strip:
+
+       Top-level spatial duplicate keys (`crs`, `extent`, `bounds`, `resolution`, `feature_count`, `band_count`) and temporal-namespace keys (`temporal_start`, `temporal_end`, `temporal_resolution`, `temporal_observation_count`) are stripped at `Artifact` construction.
+
+   Do NOT restructure other sections. Do NOT touch the `Connector`, `SourceRef`, `Operator`, `Executor`, `Check`, `Registry`, `Flow`, or `Adapter` sections.
+
+5. In `PRESSURE_TESTS.md`, append a new top-level numbered section at the END of the file. Use the next available number (read the file to determine; the highest existing number plus one). Date `(2026-05-06)`. Follow the same template as existing entries:
+
+       ## NN. Temporal Contract (2026-05-06)
+
+       **Components:** TemporalDescriptor in packages/quarry-core/src/quarry_core/artifact.py, Artifact.temporal field, frozen-metadata exclusion update
+       **Tests:** [actual count of tests added in test_temporal_descriptor.py + 2 in test_registry.py]
+       **Contract changes:** Artifact gains `temporal: TemporalDescriptor | None = None` field. Metadata strips temporal-namespace keys.
+
+       **Proved:**
+       - Three semantic states distinct: temporal=None (no contract), TemporalDescriptor(start=None, end=None) (temporal-but-unknown), TemporalDescriptor(start=t, end=t) (known)
+       - Timezone-aware UTC required; naive and non-UTC datetimes rejected at construction
+       - Half-open ranges (start xor end) rejected; both-or-neither
+       - Ordering invariant: start <= end when both set
+       - observation_count >= 1, resolution > 0 when set
+       - Frozen, hashable, equatable
+       - Existing artifacts continue to construct unchanged (temporal=None default)
+       - Metadata cannot shadow temporal contract via temporal_* keys
+
+       **Signals watched:**
+       - Connector population scope-creep → not triggered (Phase 1 explicitly defers connectors)
+       - Operator inheritance scope-creep → not triggered (deferred until first temporal-aware operator)
+       - Non-UTC / paleo / year-only models → not triggered (deferred until forced by a real connector)
+       - Half-open range pressure → not triggered (deferred to v2+)
+
+       Use the actual test count after writing them. Do NOT touch existing entries. Do NOT renumber.
+
+Verify:
+- `uv run ruff check packages/quarry-core/src/quarry_core/artifact.py tests/pressure_test/test_temporal_descriptor.py tests/pressure_test/test_registry.py`
+- `uv run ruff format --check packages/quarry-core/src/quarry_core/artifact.py tests/pressure_test/test_temporal_descriptor.py tests/pressure_test/test_registry.py`
+- Quick syntax / import sanity: `uv run python -c \"from quarry_core.artifact import TemporalDescriptor, Artifact, SpatialDescriptor; print('ok')\"`
+- The settlement gate runs the full pressure suite — trust it; do NOT run pytest yourself.
+"""
+commit_message = "quarry-core: add TemporalDescriptor and Artifact.temporal contract"
+self_review = true
+
+files.edit = [
+  "packages/quarry-core/src/quarry_core/artifact.py",
+  "tests/pressure_test/test_registry.py",
+  "CONTRACTS.md",
+  "PRESSURE_TESTS.md",
+]
+files.create = ["tests/pressure_test/test_temporal_descriptor.py"]
