@@ -1,4 +1,0 @@
-[plan]
-name = "temporal-contract-foundation"
-summary = "Add TemporalDescriptor and Artifact.temporal to quarry-core as a typed temporal contract parallel to SpatialDescriptor. Foundation only — connectors and operators are unchanged. Updates CONTRACTS.md and PRESSURE_TESTS.md as part of the artifact-lane change."
-sections = ["tasks"]
