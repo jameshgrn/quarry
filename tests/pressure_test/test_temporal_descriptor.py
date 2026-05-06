@@ -35,7 +35,7 @@ def test_construct_with_utc_instant():
 
 
 def test_construct_with_utc_range():
-    """TemporalDescriptor(start=t0, end=t1, resolution=timedelta(minutes=15), observation_count=140256) constructs with no error."""
+    """Construct with start, end, resolution, observation_count — no error."""
     t0 = datetime(2024, 6, 15, 10, 30, tzinfo=timezone.utc)
     t1 = datetime(2024, 6, 16, 10, 30, tzinfo=timezone.utc)
     descriptor = TemporalDescriptor(
@@ -51,14 +51,14 @@ def test_construct_with_utc_range():
 
 
 def test_naive_start_rejected():
-    """TemporalDescriptor(start=datetime(2024, 6, 15), end=datetime(2024, 6, 15)) raises ValueError with "timezone-aware" in the message."""
+    """Naive datetimes for start raise ValueError with 'timezone-aware' in the message."""
     naive = datetime(2024, 6, 15)
     with pytest.raises(ValueError, match="timezone-aware"):
         TemporalDescriptor(start=naive, end=naive)
 
 
 def test_naive_end_rejected():
-    """TemporalDescriptor(start=datetime(2024, 6, 15, tzinfo=timezone.utc), end=datetime(2024, 6, 16)) raises ValueError with "timezone-aware" in the message."""
+    """Naive datetimes for end raise ValueError with 'timezone-aware' in the message."""
     utc = datetime(2024, 6, 15, tzinfo=timezone.utc)
     naive = datetime(2024, 6, 16)
     with pytest.raises(ValueError, match="timezone-aware"):
@@ -66,7 +66,7 @@ def test_naive_end_rejected():
 
 
 def test_non_utc_start_rejected():
-    """Pass a datetime with a non-UTC timezone(timedelta(hours=-5)); raises ValueError with "UTC" in the message."""
+    """Non-UTC timezone offset on start raises ValueError with 'UTC' in the message."""
     est = timezone(timedelta(hours=-5))
     t_est = datetime(2024, 6, 15, 10, 30, tzinfo=est)
     t_utc = datetime(2024, 6, 15, 15, 30, tzinfo=timezone.utc)
@@ -75,7 +75,7 @@ def test_non_utc_start_rejected():
 
 
 def test_half_open_range_rejected_start_only():
-    """TemporalDescriptor(start=t, end=None) raises ValueError mentioning "both be set or both be None"."""
+    """start set with end=None raises ValueError mentioning 'both be set or both be None'."""
     t = datetime(2024, 6, 15, 10, 30, tzinfo=timezone.utc)
     with pytest.raises(ValueError, match="both be set or both be None"):
         TemporalDescriptor(start=t, end=None)
@@ -89,7 +89,7 @@ def test_half_open_range_rejected_end_only():
 
 
 def test_inverted_range_rejected():
-    """TemporalDescriptor(start=t1, end=t0) where t1 > t0 raises ValueError with "start ... must be <=" in the message."""
+    """Inverted range (start > end) raises ValueError with 'start ... must be <=' in message."""
     t0 = datetime(2024, 6, 15, 10, 30, tzinfo=timezone.utc)
     t1 = datetime(2024, 6, 16, 10, 30, tzinfo=timezone.utc)
     with pytest.raises(ValueError, match="start .* must be <="):
