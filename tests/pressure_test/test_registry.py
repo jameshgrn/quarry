@@ -143,6 +143,43 @@ class TestArtifactRoundTrip:
         assert artifact.spatial.extent == (0.0, 1.0, 2.0, 3.0)
         assert artifact.spatial.feature_count == 7
 
+    def test_temporal_default_is_none(self):
+        """Construct an Artifact without passing temporal; assert artifact.temporal is None."""
+        artifact = Artifact(
+            type=ArtifactType.VECTOR,
+            spatial=SpatialDescriptor(crs="EPSG:4326"),
+        )
+        assert artifact.temporal is None
+
+    def test_metadata_does_not_duplicate_temporal_contract(self):
+        """Metadata strips temporal-namespace keys; non-conflicting keys survive."""
+        from datetime import datetime, timezone
+
+        from quarry_core.artifact import TemporalDescriptor
+
+        t = datetime(2024, 6, 15, 10, 30, tzinfo=timezone.utc)
+        artifact = Artifact(
+            type=ArtifactType.VECTOR,
+            spatial=SpatialDescriptor(crs="EPSG:4326"),
+            temporal=TemporalDescriptor(start=t, end=t),
+            metadata={
+                "driver": "GeoJSON",
+                "temporal_start": "2024-06-15T10:30:00Z",
+                "temporal_end": "2024-06-15T10:30:00Z",
+                "temporal_resolution": "PT15M",
+                "temporal_observation_count": 100,
+            },
+        )
+
+        assert "temporal_start" not in artifact.metadata
+        assert "temporal_end" not in artifact.metadata
+        assert "temporal_resolution" not in artifact.metadata
+        assert "temporal_observation_count" not in artifact.metadata
+        assert artifact.metadata == {"driver": "GeoJSON"}
+        assert artifact.temporal is not None
+        assert artifact.temporal.start == t
+        assert artifact.temporal.end == t
+
     def test_with_check_does_not_alias_metadata(self, sample_raster, workspace):
         conn = LocalFileConnector()
         artifact = conn.materialize(str(sample_raster), workspace).artifact

@@ -15,7 +15,7 @@ import hashlib
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
 from types import MappingProxyType
@@ -65,9 +65,14 @@ def _freeze_params(params: Mapping[str, Any]) -> Mapping[str, Any]:
 def _freeze_metadata(metadata: Mapping[str, Any]) -> Mapping[str, Any]:
     """Freeze artifact metadata so copies cannot alias mutable nested state."""
     spatial_keys = {"crs", "extent", "bounds", "resolution", "feature_count", "band_count"}
-    return MappingProxyType(
-        {k: _freeze_value(v) for k, v in metadata.items() if k not in spatial_keys}
-    )
+    temporal_keys = {
+        "temporal_start",
+        "temporal_end",
+        "temporal_resolution",
+        "temporal_observation_count",
+    }
+    excluded = spatial_keys | temporal_keys
+    return MappingProxyType({k: _freeze_value(v) for k, v in metadata.items() if k not in excluded})
 
 
 @dataclass(frozen=True)
@@ -93,6 +98,59 @@ class SpatialDescriptor:
     resolution: tuple[float, float] | None = None  # x_res, y_res (rasters)
     feature_count: int | None = None  # vectors/tables
     band_count: int | None = None  # rasters
+
+
+@dataclass(frozen=True)
+class TemporalDescriptor:
+    """Typed temporal contract for an artifact.
+
+    Three legitimate states:
+      - all fields None: temporal-but-unknown (artifact has time but it isn't known)
+      - start == end (both set): instant (snapshot at a single moment)
+      - start < end: time range; resolution and observation_count optional
+
+    Time values must be timezone-aware UTC `datetime`. Naive or non-UTC
+    values raise `ValueError`. v1 does not support paleo/year-only/decade
+    models or non-UTC timezones — those are deferred until forced by a
+    real connector.
+    """
+
+    start: datetime | None = None
+    end: datetime | None = None
+    resolution: timedelta | None = None
+    observation_count: int | None = None
+
+    def __post_init__(self) -> None:
+        # D2: timezone-aware UTC required
+        for label, value in (("start", self.start), ("end", self.end)):
+            if value is None:
+                continue
+            if value.tzinfo is None:
+                raise ValueError(
+                    f"TemporalDescriptor.{label} must be timezone-aware (got naive datetime)"
+                )
+            if value.utcoffset() != timedelta(0):
+                raise ValueError(
+                    f"TemporalDescriptor.{label} must be UTC (got offset {value.utcoffset()})"
+                )
+        # both-or-neither: half-open ranges deferred to v2+
+        if (self.start is None) != (self.end is None):
+            raise ValueError("TemporalDescriptor: start and end must both be set or both be None")
+        # ordering
+        if self.start is not None and self.end is not None and self.start > self.end:
+            raise ValueError(
+                f"TemporalDescriptor: start ({self.start}) must be <= end ({self.end})"
+            )
+        # observation_count >= 1 when set
+        if self.observation_count is not None and self.observation_count < 1:
+            raise ValueError(
+                f"TemporalDescriptor.observation_count must be >= 1 (got {self.observation_count})"
+            )
+        # resolution > 0 when set
+        if self.resolution is not None and self.resolution <= timedelta(0):
+            raise ValueError(
+                f"TemporalDescriptor.resolution must be positive (got {self.resolution})"
+            )
 
 
 @dataclass(frozen=True)
@@ -138,6 +196,9 @@ class Artifact:
 
     # Spatial properties
     spatial: SpatialDescriptor = field(default_factory=SpatialDescriptor)
+
+    # Temporal properties
+    temporal: TemporalDescriptor | None = None
 
     # How it was created
     lineage: Lineage | None = None
