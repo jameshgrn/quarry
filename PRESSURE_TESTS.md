@@ -993,3 +993,25 @@ complete. Zero contract changes.
 
 **Debt retained:**
 - Semantic product connectors (FOFStack, PIXC, SLC, Sentinel2) are not auto-routed by generic extensions/catalog strings because `.h5`, `.nc`, and STAC-shaped refs are not enough proof of product semantics.
+
+## 34. Temporal Contract (2026-05-06)
+
+**Components:** TemporalDescriptor in packages/quarry-core/src/quarry_core/artifact.py, Artifact.temporal field, frozen-metadata exclusion update
+**Tests:** 17 (15 in test_temporal_descriptor.py + 2 in test_registry.py)
+**Contract changes:** Artifact gains `temporal: TemporalDescriptor | None = None` field. Metadata strips temporal-namespace keys.
+
+**Proved:**
+- Three semantic states distinct: temporal=None (no contract), TemporalDescriptor(start=None, end=None) (temporal-but-unknown), TemporalDescriptor(start=t, end=t) (known)
+- Timezone-aware UTC required; naive and non-UTC datetimes rejected at construction
+- Half-open ranges (start xor end) rejected; both-or-neither
+- Ordering invariant: start <= end when both set
+- observation_count >= 1, resolution > 0 when set
+- Frozen, hashable, equatable
+- Existing artifacts continue to construct unchanged (temporal=None default)
+- Metadata cannot shadow temporal contract via temporal_* keys
+
+**Signals watched:**
+- Connector population scope-creep → not triggered (Phase 1 explicitly defers connectors)
+- Operator inheritance scope-creep → not triggered (deferred until first temporal-aware operator)
+- Non-UTC / paleo / year-only models → not triggered (deferred until forced by a real connector)
+- Half-open range pressure → not triggered (deferred to v2+)

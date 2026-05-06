@@ -9,9 +9,10 @@ The internal unit of truth. NOT a file.
 - **Identity** is the `id` field (UUID). Not the path. Not the name.
 - **BackingStore** describes where data physically lives (local_file, lazy_handle, duckdb, postgis). This is NOT identity.
 - **SpatialDescriptor** holds CRS, extent, resolution, feature_count, band_count. Populated from actual data, not guessed.
+- **TemporalDescriptor** holds `start`, `end` (both timezone-aware UTC `datetime` or both `None`), optional `resolution` (`timedelta`), and optional `observation_count`. `Artifact.temporal = None` means "no temporal contract declared"; `TemporalDescriptor(start=None, end=None)` means "temporal-but-unknown." v1 requires UTC; non-UTC timezones and non-`datetime` temporal models (paleo, year-only, decade) are deferred.
 - **Lineage** records how the artifact was created (operation, input IDs, params, timestamp) and persists with the artifact itself.
 - **Checks** accumulate from the checks table. Artifact exposes `validation_state` derived from accumulated check results.
-- **Metadata** is an opaque connector extension bag for source-specific, non-canonical descriptive context (driver, theme, layer name, dataset identity). Must never duplicate or override typed artifact contract fields (`spatial`, `lineage`). Top-level spatial duplicate keys (`crs`, `extent`, `bounds`, `resolution`, `feature_count`, `band_count`) are stripped at `Artifact` construction. Operators must not depend on metadata keys.
+- **Metadata** is an opaque connector extension bag for source-specific, non-canonical descriptive context (driver, theme, layer name, dataset identity). Must never duplicate or override typed artifact contract fields (`spatial`, `lineage`). Top-level spatial duplicate keys (`crs`, `extent`, `bounds`, `resolution`, `feature_count`, `band_count`) and temporal-namespace keys (`temporal_start`, `temporal_end`, `temporal_resolution`, `temporal_observation_count`) are stripped at `Artifact` construction. Operators must not depend on metadata keys.
 
 Mutability rules:
 - `id`, `type`: immutable
